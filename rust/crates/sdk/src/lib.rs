@@ -28,6 +28,7 @@ mod agent_context;
 mod event_bus;
 mod extension;
 mod resource_loader;
+mod review;
 #[cfg(feature = "rpc")]
 mod rpc;
 mod session;
@@ -43,6 +44,10 @@ pub use event_bus::{
 };
 pub use extension::{Extension, ExtensionRegistry, SimpleExtension};
 pub use resource_loader::{DefaultResourceLoader, ResourceLoader};
+pub use review::{
+    ChangeRecord, Decision, FileChange, FileChangeType, ReviewDecision, ReviewGate, ReviewManager,
+    RiskClassifier, RiskLevel,
+};
 pub use session::{AgentSession, AgentSessionBuilder, BoxedApiClient, DummyApiClient};
 pub use session_manager::{SessionManager, SessionManagerConfig};
 pub use session_tree::{SessionTree, SessionTreeNode};
