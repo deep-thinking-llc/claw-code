@@ -311,8 +311,10 @@ fn per_provider_label(model: &str) -> String {
         "vLLM".to_string()
     } else if lower.starts_with("gpt-") || lower.starts_with("openai/") {
         "OpenAI".to_string()
-    } else if lower.starts_with("qwen") {
+    } else if lower.contains("qwen") {
         "Qwen".to_string()
+    } else if lower.contains("kimi") {
+        "Kimi".to_string()
     } else {
         model.to_string()
     }
