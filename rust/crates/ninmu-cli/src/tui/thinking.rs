@@ -7,19 +7,20 @@ pub struct ThinkingFrames;
 
 impl ThinkingFrames {
     /// Returns an iterator that cycles through animation frames forever.
-    pub fn frames() -> impl Iterator<Item = &'static str> {
+    pub fn frames() -> impl Iterator<Item = String> {
+        let accent = Theme::ACCENT.to_string();
+        let reset = Theme::RESET.to_string();
         [
-            "\x1b[38;5;13m  ●\x1b[0m",
-            "\x1b[38;5;13m  ●●\x1b[0m",
-            "\x1b[38;5;13m  ●●●\x1b[0m",
-            "\x1b[38;5;13m  ●●●●\x1b[0m",
-            "\x1b[38;5;13m  ●●●●●\x1b[0m",
-            "\x1b[38;5;13m  ●●●●\x1b[0m",
-            "\x1b[38;5;13m  ●●●\x1b[0m",
-            "\x1b[38;5;13m  ●●\x1b[0m",
+            format!("{accent}  ▓░░░{reset}"),
+            format!("{accent}  ▓▓░░{reset}"),
+            format!("{accent}  ▓▓▓░{reset}"),
+            format!("{accent}  ▓▓▓▓{reset}"),
+            format!("{accent}  ▓▓▓░{reset}"),
+            format!("{accent}  ▓▓░░{reset}"),
+            format!("{accent}  ▓░░░{reset}"),
+            format!("{accent}  ░░░░{reset}"),
         ]
-        .iter()
-        .copied()
+        .into_iter()
         .cycle()
     }
 
@@ -65,11 +66,11 @@ mod tests {
 
     #[test]
     fn frames_cycles_indefinitely() {
-        let frames: Vec<&str> = ThinkingFrames::frames().take(16).collect();
+        let frames: Vec<String> = ThinkingFrames::frames().take(16).collect();
         // 8 unique frames, then repeats
         assert_eq!(frames.len(), 16);
-        let first = frames[0];
-        assert_eq!(frames[8], first); // 9th frame = 1st (cycle)
+        let first = &frames[0];
+        assert_eq!(&frames[8], first); // 9th frame = 1st (cycle)
     }
 
     #[test]
