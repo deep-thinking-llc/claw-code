@@ -35,6 +35,10 @@ pub struct OpenAiCompatConfig {
     /// Optional secondary env var for API key (checked if primary is absent).
     /// Used by Qwen external to fall back to `OPENAI_API_KEY`.
     pub api_key_fallback_env: &'static str,
+    /// When true, missing API key is not an error — the provider works
+    /// without auth (local Ollama/vLLM). When `api_key_env` is also set
+    /// (e.g. `OLLAMA_API_KEY` for Ollama Cloud), the key is used if present.
+    pub auth_optional: bool,
     pub base_url_env: &'static str,
     /// Optional secondary env var for base URL (checked if primary is absent).
     /// Used by Qwen external to fall back to `OPENAI_BASE_URL`.
@@ -51,7 +55,7 @@ const XAI_ENV_VARS: &[&str] = &["XAI_API_KEY"];
 const OPENAI_ENV_VARS: &[&str] = &["OPENAI_API_KEY"];
 const DASHSCOPE_ENV_VARS: &[&str] = &["DASHSCOPE_API_KEY"];
 const DEEPSEEK_ENV_VARS: &[&str] = &["DEEPSEEK_API_KEY"];
-const OLLAMA_ENV_VARS: &[&str] = &[];
+const OLLAMA_ENV_VARS: &[&str] = &["OLLAMA_API_KEY"];
 const QWEN_ENV_VARS: &[&str] = &["QWEN_API_KEY"];
 const VLLM_ENV_VARS: &[&str] = &[];
 
@@ -71,6 +75,7 @@ impl OpenAiCompatConfig {
             provider_name: "xAI",
             api_key_env: "XAI_API_KEY",
             api_key_fallback_env: "",
+            auth_optional: false,
             base_url_env: "XAI_BASE_URL",
             base_url_fallback_env: "",
             default_base_url: DEFAULT_XAI_BASE_URL,
@@ -84,6 +89,7 @@ impl OpenAiCompatConfig {
             provider_name: "OpenAI",
             api_key_env: "OPENAI_API_KEY",
             api_key_fallback_env: "",
+            auth_optional: false,
             base_url_env: "OPENAI_BASE_URL",
             base_url_fallback_env: "",
             default_base_url: DEFAULT_OPENAI_BASE_URL,
@@ -101,6 +107,7 @@ impl OpenAiCompatConfig {
             provider_name: "DashScope",
             api_key_env: "DASHSCOPE_API_KEY",
             api_key_fallback_env: "",
+            auth_optional: false,
             base_url_env: "DASHSCOPE_BASE_URL",
             base_url_fallback_env: "",
             default_base_url: DEFAULT_DASHSCOPE_BASE_URL,
@@ -116,6 +123,7 @@ impl OpenAiCompatConfig {
             provider_name: "DeepSeek",
             api_key_env: "DEEPSEEK_API_KEY",
             api_key_fallback_env: "",
+            auth_optional: false,
             base_url_env: "DEEPSEEK_BASE_URL",
             base_url_fallback_env: "",
             default_base_url: DEFAULT_DEEPSEEK_BASE_URL,
@@ -123,13 +131,16 @@ impl OpenAiCompatConfig {
         }
     }
 
-    /// Ollama local inference server. No auth required by default.
+    /// Ollama — local inference server (no auth) or Ollama Cloud
+    /// (`OLLAMA_API_KEY` for `api.ollama.com`). Set `OLLAMA_BASE_URL`
+    /// to point at your Ollama instance or cloud endpoint.
     #[must_use]
     pub const fn ollama() -> Self {
         Self {
             provider_name: "Ollama",
-            api_key_env: "",
+            api_key_env: "OLLAMA_API_KEY",
             api_key_fallback_env: "",
+            auth_optional: true,
             base_url_env: "OLLAMA_BASE_URL",
             base_url_fallback_env: "",
             default_base_url: DEFAULT_OLLAMA_BASE_URL,
@@ -147,6 +158,7 @@ impl OpenAiCompatConfig {
             provider_name: "Qwen",
             api_key_env: "QWEN_API_KEY",
             api_key_fallback_env: "OPENAI_API_KEY",
+            auth_optional: false,
             base_url_env: "QWEN_BASE_URL",
             base_url_fallback_env: "OPENAI_BASE_URL",
             default_base_url: "",
@@ -154,13 +166,15 @@ impl OpenAiCompatConfig {
         }
     }
 
-    /// vLLM local inference server. No auth required by default.
+    /// vLLM — local inference server. No auth required by default.
+    /// Set `VLLM_BASE_URL` to point at your vLLM instance.
     #[must_use]
     pub const fn vllm() -> Self {
         Self {
             provider_name: "vLLM",
             api_key_env: "",
             api_key_fallback_env: "",
+            auth_optional: true,
             base_url_env: "VLLM_BASE_URL",
             base_url_fallback_env: "",
             default_base_url: DEFAULT_VLLM_BASE_URL,
@@ -217,8 +231,7 @@ impl OpenAiCompatClient {
     }
 
     pub fn from_env(config: OpenAiCompatConfig) -> Result<Self, ApiError> {
-        // Providers that don't require auth (Ollama, vLLM) have an empty
-        // api_key_env and skip the credential check.
+        // Providers with empty api_key_env (vLLM) skip auth entirely.
         if config.api_key_env.is_empty() {
             return Ok(Self::new(String::new(), config));
         }
@@ -227,6 +240,7 @@ impl OpenAiCompatClient {
             None if !config.api_key_fallback_env.is_empty() => {
                 match read_env_non_empty(config.api_key_fallback_env)? {
                     Some(key) => key,
+                    None if config.auth_optional => String::new(),
                     None => {
                         return Err(ApiError::missing_credentials(
                             config.provider_name,
@@ -235,6 +249,7 @@ impl OpenAiCompatClient {
                     }
                 }
             }
+            None if config.auth_optional => String::new(),
             None => {
                 return Err(ApiError::missing_credentials(
                     config.provider_name,
@@ -1915,7 +1930,8 @@ mod tests {
 
         let ollama = OpenAiCompatConfig::ollama();
         assert_eq!(ollama.provider_name, "Ollama");
-        assert_eq!(ollama.api_key_env, "");
+        assert_eq!(ollama.api_key_env, "OLLAMA_API_KEY");
+        assert!(ollama.auth_optional);
         assert!(ollama.default_base_url.contains("localhost:11434"));
 
         let qwen = OpenAiCompatConfig::qwen();
@@ -1926,6 +1942,7 @@ mod tests {
         let vllm = OpenAiCompatConfig::vllm();
         assert_eq!(vllm.provider_name, "vLLM");
         assert_eq!(vllm.api_key_env, "");
+        assert!(vllm.auth_optional);
         assert!(vllm.default_base_url.contains("localhost:8000"));
     }
 
@@ -1937,7 +1954,7 @@ mod tests {
         );
         assert_eq!(
             OpenAiCompatConfig::ollama().credential_env_vars(),
-            &[] as &[&str]
+            &["OLLAMA_API_KEY"] as &[&str]
         );
         assert_eq!(
             OpenAiCompatConfig::qwen().credential_env_vars(),
@@ -2522,5 +2539,31 @@ mod tests {
 
         let result = OpenAiCompatClient::from_env(OpenAiCompatConfig::qwen());
         assert!(result.is_err(), "should fail when both keys are missing");
+    }
+
+    #[test]
+    fn ollama_works_without_key_local_mode() {
+        let _lock = env_lock();
+        std::env::remove_var("OLLAMA_API_KEY");
+
+        let result = OpenAiCompatClient::from_env(OpenAiCompatConfig::ollama());
+        assert!(
+            result.is_ok(),
+            "ollama should work without API key (local mode)"
+        );
+    }
+
+    #[test]
+    fn ollama_uses_api_key_when_set_cloud_mode() {
+        let _lock = env_lock();
+        std::env::set_var("OLLAMA_API_KEY", "sk-ollama-cloud-test");
+
+        let result = OpenAiCompatClient::from_env(OpenAiCompatConfig::ollama());
+        assert!(
+            result.is_ok(),
+            "ollama should work with API key (cloud mode)"
+        );
+
+        std::env::remove_var("OLLAMA_API_KEY");
     }
 }
