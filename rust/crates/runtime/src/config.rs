@@ -64,6 +64,7 @@ pub struct RuntimeFeatureConfig {
     permission_rules: RuntimePermissionRuleConfig,
     sandbox: SandboxConfig,
     provider_fallbacks: ProviderFallbackConfig,
+    provider_defaults: BTreeMap<String, ProviderDefaultConfig>,
     trusted_roots: Vec<String>,
     startup_banner: Option<String>,
 }
@@ -75,6 +76,19 @@ pub struct RuntimeFeatureConfig {
 pub struct ProviderFallbackConfig {
     primary: Option<String>,
     fallbacks: Vec<String>,
+}
+
+/// Per-provider default overrides for request parameters.
+///
+/// Keys match provider labels: `"deepseek"`, `"ollama"`, `"openai"`, etc.
+/// When the resolved model routes to a provider with an entry here, the
+/// provider-specific defaults override the global settings.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProviderDefaultConfig {
+    pub max_tokens: Option<u32>,
+    pub temperature: Option<f64>,
+    pub top_p: Option<f64>,
+    pub reasoning_effort: Option<String>,
 }
 
 /// Hook command lists grouped by lifecycle stage.
@@ -315,6 +329,7 @@ impl ConfigLoader {
             permission_rules: parse_optional_permission_rules(&merged_value)?,
             sandbox: parse_optional_sandbox_config(&merged_value)?,
             provider_fallbacks: parse_optional_provider_fallbacks(&merged_value)?,
+            provider_defaults: parse_optional_provider_defaults(&merged_value)?,
             trusted_roots: parse_optional_trusted_roots(&merged_value)?,
             startup_banner: parse_optional_startup_banner(&merged_value),
         };
@@ -484,6 +499,11 @@ impl RuntimeFeatureConfig {
     #[must_use]
     pub fn provider_fallbacks(&self) -> &ProviderFallbackConfig {
         &self.provider_fallbacks
+    }
+
+    #[must_use]
+    pub fn provider_defaults(&self) -> &BTreeMap<String, ProviderDefaultConfig> {
+        &self.provider_defaults
     }
 
     #[must_use]
@@ -909,6 +929,58 @@ fn parse_optional_provider_fallbacks(
     let fallbacks = optional_string_array(entry, "fallbacks", "merged settings.providerFallbacks")?
         .unwrap_or_default();
     Ok(ProviderFallbackConfig { primary, fallbacks })
+}
+
+fn parse_optional_provider_defaults(
+    root: &JsonValue,
+) -> Result<BTreeMap<String, ProviderDefaultConfig>, ConfigError> {
+    let Some(object) = root.as_object() else {
+        return Ok(BTreeMap::new());
+    };
+    let Some(providers_value) = object.get("providers") else {
+        return Ok(BTreeMap::new());
+    };
+    let providers_obj =
+        expect_object(providers_value, "merged settings.providers")?;
+    let mut defaults = BTreeMap::new();
+    for (provider_key, provider_value) in providers_obj {
+        let entry =
+            expect_object(provider_value, &format!("merged settings.providers.{provider_key}"))?;
+        let max_tokens =
+            optional_u32(entry, "maxTokens", &format!("merged settings.providers.{provider_key}"))?;
+        let temperature = optional_f64(
+            entry,
+            "temperature",
+            &format!("merged settings.providers.{provider_key}"),
+        )?;
+        let top_p = optional_f64(
+            entry,
+            "topP",
+            &format!("merged settings.providers.{provider_key}"),
+        )?;
+        let reasoning_effort = optional_string(
+            entry,
+            "reasoningEffort",
+            &format!("merged settings.providers.{provider_key}"),
+        )?
+        .map(str::to_string);
+        if max_tokens.is_some()
+            || temperature.is_some()
+            || top_p.is_some()
+            || reasoning_effort.is_some()
+        {
+            defaults.insert(
+                provider_key.clone(),
+                ProviderDefaultConfig {
+                    max_tokens,
+                    temperature,
+                    top_p,
+                    reasoning_effort,
+                },
+            );
+        }
+    }
+    Ok(defaults)
 }
 
 fn parse_optional_trusted_roots(root: &JsonValue) -> Result<Vec<String>, ConfigError> {
