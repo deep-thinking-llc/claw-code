@@ -1890,9 +1890,9 @@ fn check_providers_health() -> DiagnosticCheck {
         },
         ProviderStatus {
             label: "Ollama",
-            env_var: "OLLAMA_BASE_URL",
+            env_var: "OLLAMA_API_KEY / OLLAMA_BASE_URL",
             is_local: true,
-            configured: env_present("OLLAMA_BASE_URL"),
+            configured: env_present("OLLAMA_API_KEY") || env_present("OLLAMA_BASE_URL"),
         },
         ProviderStatus {
             label: "vLLM",
@@ -1953,16 +1953,32 @@ fn check_providers_health() -> DiagnosticCheck {
         );
     }
 
-    // Probe local providers for available models
+    // Probe Ollama: use /api/tags for local, /v1/models for cloud
+    let ollama_cloud = env_present("OLLAMA_API_KEY");
     let ollama_url = env::var("OLLAMA_BASE_URL")
         .ok()
         .filter(|v| !v.trim().is_empty())
-        .unwrap_or_else(|| "http://localhost:11434".to_string());
-    let ollama_models = discover_ollama_models(&ollama_url);
+        .unwrap_or_else(|| {
+            if ollama_cloud {
+                "https://api.ollama.com".to_string()
+            } else {
+                "http://localhost:11434".to_string()
+            }
+        });
+    let ollama_models = if ollama_cloud {
+        discover_vllm_models(&ollama_url) // Ollama Cloud uses /v1/models
+    } else {
+        discover_ollama_models(&ollama_url) // Local Ollama uses /api/tags
+    };
     if let Some(ref models) = ollama_models {
         if !models.is_empty() {
+            let label = if ollama_cloud {
+                "Ollama Cloud models"
+            } else {
+                "Ollama models"
+            };
             details.push(format!(
-                "\n  Ollama models ({})    {}",
+                "\n  {label} ({})    {}",
                 models.len(),
                 models.join(", ")
             ));
@@ -1990,7 +2006,13 @@ fn check_providers_health() -> DiagnosticCheck {
 /// Probe Ollama's `/api/tags` endpoint and return model names.
 /// Returns `None` if the server is unreachable (no error displayed).
 fn discover_ollama_models(base_url: &str) -> Option<Vec<String>> {
-    let url = format!("{}/api/tags", base_url.trim_end_matches('/'));
+    // Ollama's /api/tags is at the root, not under /v1.
+    // Strip trailing /v1 if present so we hit the right endpoint.
+    let root = base_url
+        .trim_end_matches('/')
+        .strip_suffix("/v1")
+        .unwrap_or(base_url);
+    let url = format!("{root}/api/tags");
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
         .build()
