@@ -31,6 +31,7 @@ mod notification;
 mod orchestrator;
 mod resource_loader;
 mod review;
+mod security;
 #[cfg(feature = "rpc")]
 mod rpc;
 mod session;
@@ -52,6 +53,9 @@ pub use notification::{
 };
 pub use orchestrator::{
     AgentDefinition, AgentOrchestrator, OrchestratedTask, ResourceLock, TaskState,
+};
+pub use security::{
+    AuditEntry, AuditEvent, AuditLog, SecretMatch, SecretScrubber, SecurityConfig,
 };
 pub use resource_loader::{DefaultResourceLoader, ResourceLoader};
 pub use review::{
