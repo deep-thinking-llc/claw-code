@@ -1205,6 +1205,10 @@ fn optional_temperature_hundredths(
     key: &str,
     context: &str,
 ) -> Result<Option<u32>, ConfigError> {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    fn cast_hundredths(f: f64) -> u32 {
+        (f * 100.0).round() as u32
+    }
     match object.get(key) {
         Some(value) => match value {
             JsonValue::Number(n) => {
@@ -1222,7 +1226,7 @@ fn optional_temperature_hundredths(
                         "{context}: field {key} must be a number or numeric string"
                     ))
                 })?;
-                Ok(Some((f * 100.0).round() as u32))
+                Ok(Some(cast_hundredths(f)))
             }
             _ => Err(ConfigError::Parse(format!(
                 "{context}: field {key} must be a number"
