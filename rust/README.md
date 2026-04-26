@@ -189,6 +189,7 @@ rust/
     ├── plugins/            # Plugin metadata, manager, install/enable/disable surfaces
     ├── runtime/            # Session, config, permissions, MCP, prompts, auth/runtime loop
     ├── ninmu-cli/          # Main CLI binary (`ninmu`)
+    ├── sdk/                # Public SDK crate (AgentSession, Orchestrator, Review, Notifications, Security, Setup)
     ├── telemetry/          # Session tracing and usage telemetry types
     └── tools/              # Built-in tools, skill resolution, tool search, agent runtime surfaces
 ```
@@ -202,6 +203,7 @@ rust/
 - **plugins** — plugin metadata, install/enable/disable/update flows, plugin tool definitions, hook integration surfaces
 - **runtime** — `ConversationRuntime`, config loading, session persistence, permission policy, MCP client lifecycle, system prompt assembly, usage tracking
 - **ninmu-cli** — REPL, one-shot prompt, direct CLI subcommands, streaming display, tool call rendering, CLI argument parsing
+- **sdk** — public programmatic API: `AgentSession`, `AgentSessionBuilder`, `EventBus`, `SessionTree`, `SessionTreeLog`, `ReviewManager`, `NotificationDispatcher`, `AgentOrchestrator`, `SecretScrubber`, `AuditLog`, `SetupReport`, `ToolRegistry`, `Extension`, `AgentContext`, and JSON-RPC server
 - **telemetry** — session trace events and supporting telemetry payloads
 - **tools** — tool specs + execution: Bash, ReadFile, WriteFile, EditFile, GlobSearch, GrepSearch, WebSearch, WebFetch, Agent, TodoWrite, NotebookEdit, Skill, ToolSearch, and runtime-facing tool discovery
 

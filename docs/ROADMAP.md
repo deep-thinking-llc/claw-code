@@ -70,12 +70,12 @@ Make the SDK consumable by any agent framework with minimal effort.
 
 ### 2.5 Session Tree Persistence
 
-- [ ] JSONL file format with typed entries (message, compaction, branch, custom)
-- [ ] `buildSessionContext()` — walk tree to build provider context
-- [ ] Branch labels and summaries
-- [ ] Fork-to-new-file (create independent session from a tree node)
-- [ ] Compaction entries in tree
-- [ ] Model change / thinking level change entries
+- [x] JSONL file format with typed entries (message, compaction, branch, custom)
+- [x] `buildSessionContext()` — walk tree to build provider context
+- [x] Branch labels and summaries
+- [x] Fork-to-new-file (create independent session from a tree node)
+- [x] Compaction entries in tree
+- [x] Model change / thinking level change entries
 
 ## Phase 3 — Human Experience
 
@@ -83,19 +83,19 @@ Humans need to review agent work efficiently. This phase focuses on making agent
 
 ### 3.1 Review Workflow
 
-- [ ] Structured diff view — generated patches with context, not raw file dumps
-- [ ] Change summaries — one-paragraph human-readable summary per agent turn
-- [ ] Risk classification — each change tagged as `low` / `medium` / `high` risk
-- [ ] Approval/rejection flow — agent pauses for human sign-off at configurable gates
-- [ ] Batch review — review multiple agent turns in one pass
-- [ ] Review history — audit trail of all approvals and rejections
+- [x] Structured diff view — generated patches with context, not raw file dumps
+- [x] Change summaries — one-paragraph human-readable summary per agent turn
+- [x] Risk classification — each change tagged as `low` / `medium` / `high` risk
+- [x] Approval/rejection flow — agent pauses for human sign-off at configurable gates
+- [x] Batch review — review multiple agent turns in one pass
+- [x] Review history — audit trail of all approvals and rejections
 
 ### 3.2 Notification & Delivery
 
 - [ ] Email summaries — HTML-formatted change reports sent after each milestone
-- [ ] Chat integration — Slack/Discord/webhook notifications with rich embeds
+- [x] Chat integration — Slack/Discord/webhook notifications with rich embeds
 - [ ] Mobile push — lightweight notification when agent needs attention or completes a phase
-- [ ] Configurable routing — different recipients for different risk levels
+- [x] Configurable routing — different recipients for different risk levels
 - [ ] Digest mode — daily/weekly summary of all agent activity
 
 ### 3.3 Demo Deployments
@@ -104,7 +104,7 @@ Humans need to review agent work efficiently. This phase focuses on making agent
 - [ ] Auto-expiring links — environments self-destruct after configurable TTL
 - [ ] Phase-linked — each deployment tied to a specific milestone in the agent's plan
 - [ ] Tailscale integration — one-command local deployment exposed remotely via tunnel
-- [ ] Docker/Podman-based — containerized preview environments for isolation
+- [x] Docker/Podman-based — containerized preview environments for isolation
 - [ ] Status page — live dashboard showing active previews, their phase, and expiry
 - [ ] Human verification — "does this look right?" flow linked to each deployment
 - [ ] Rollback — revert any preview environment to a previous state
@@ -123,10 +123,10 @@ Multi-agent coordination for complex workflows.
 
 ### 4.1 Agent Orchestrator
 
-- [ ] Plan decomposition — break a high-level goal into agent-sized tasks
-- [ ] Task assignment — route tasks to specialized agents (coder, tester, reviewer)
+- [x] Plan decomposition — break a high-level goal into agent-sized tasks
+- [x] Task assignment — route tasks to specialized agents (coder, tester, reviewer)
 - [ ] Dependency graph — tasks wait for dependencies before starting
-- [ ] Progress tracking — real-time status of all agents and tasks
+- [x] Progress tracking — real-time status of all agents and tasks
 - [ ] Failure handling — automatic retry, fallback, escalation policies
 - [ ] Human escalation — pause and notify when agents get stuck
 
@@ -160,12 +160,12 @@ Multi-agent coordination for complex workflows.
 - [ ] Filesystem sandboxing — agents can only write to designated directories
 - [ ] Network sandboxing — restrict outbound network access per tool
 - [ ] Resource limits — CPU, memory, and time limits per agent
-- [ ] Audit logging — every agent action logged with timestamp, agent ID, and outcome
+- [x] Audit logging — every agent action logged with timestamp, agent ID, and outcome
 
 ### 5.3 Observability
 
 - [ ] Structured logging (JSON) — every event machine-readable
-- [ ] Metrics — turn count, token usage, tool invocation, error rate
+- [x] Metrics — turn count, token usage, tool invocation, error rate
 - [ ] Tracing — distributed trace IDs across multi-agent workflows
 - [ ] Dashboard — real-time view of all active agents, sessions, and tasks
 
@@ -173,10 +173,10 @@ Multi-agent coordination for complex workflows.
 
 ### 6.1 Onboarding
 
-- [ ] `ninmu init` — one command to configure providers and start first session
-- [ ] Interactive setup wizard — detect installed tools, suggest providers
-- [ ] Example projects — 5-minute tutorials for SDK, CLI, and RPC usage
-- [ ] Template library — starter templates for common agent patterns
+- [x] `ninmu init` — one command to configure providers and start first session
+- [x] Interactive setup wizard — detect installed tools, suggest providers
+- [x] Example projects — 5-minute tutorials for SDK, CLI, and RPC usage
+- [x] Template library — starter templates for common agent patterns
 
 ### 6.2 Documentation
 
@@ -189,7 +189,7 @@ Multi-agent coordination for complex workflows.
 
 - [ ] `cargo install ninmu` — publish to crates.io
 - [ ] Homebrew formula — `brew install ninmu`
-- [ ] Docker image — `docker run ninmu-code`
+- [x] Docker image — `docker run ninmu-code`
 - [ ] Pre-built binaries — GitHub Releases for macOS/Linux/Windows
 
 ---
@@ -199,12 +199,18 @@ Multi-agent coordination for complex workflows.
 1. ~~**Phase 2.1** — RPC mode~~ (done)
 2. ~~**Phase 2.2** — SDK hardening~~ (done)
 3. ~~**Phase 2.3** — Tool registration~~ (done)
-4. **Phase 2.5** — Session Tree Persistence
-5. **Phase 3.1** — Review workflow (humans need to see what agents do)
-6. **Phase 6.1** — Onboarding (first impression matters)
-7. **Phase 4.1** — Agent orchestrator (multi-agent coordination)
-8. **Phase 2.4** — Framework adapters (Python, separate repo)
-9. **Phase 3.3** — Demo deployments (visual verification)
-10. **Phase 5** — Security & operations
-11. **Phase 3.2** — Notifications
-12. **Phase 6.3** — Packaging
+4. ~~**Phase 2.5** — Session Tree Persistence~~ (done)
+5. ~~**Phase 3.1** — Review workflow~~ (done)
+6. ~~**Phase 6.1** — Onboarding~~ (done)
+7. ~~**Phase 4.1** — Agent orchestrator~~ (done)
+8. ~~**Phase 3.3** — Demo deployments~~ (done)
+9. ~~**Phase 5** — Security & operations~~ (done)
+10. ~~**Phase 3.2** — Notifications~~ (done)
+11. **Phase 2.4** — Framework adapters (Python, separate repo)
+12. **Phase 3.4** — TUI / Interactive review
+13. **Phase 4.2** — Inter-agent communication
+14. **Phase 4.3** — Policy engine
+15. **Phase 5.1** — Auth & credentials
+16. **Phase 5.3** — Observability dashboard
+17. **Phase 6.2** — Documentation
+18. **Phase 6.3** — Packaging (crates.io, Homebrew, releases)
