@@ -161,30 +161,25 @@ impl LiveCli {
             |path| path.display().to_string(),
         );
         format!(
-            "\x1b[38;5;208m\
- ███╗   ██╗██╗███╗   ██╗██╗███████╗\n\
- ████╗  ██║██║████╗  ██║██║██╔════╝\n\
- ██╔██╗ ██║██║██╔██╗ ██║██║███████╗\n\
- ██║╚██╗██║██║██║╚██╗██║██║╚════██║\n\
- ██║ ╚████║██║██║ ╚████║██║███████║\n\
- ╚═╝  ╚═══╝╚═╝╚═╝  ╚═══╝╚═╝╚══════╝\x1b[0m 🦞\n\n\
-  {d}Model{r}            {}\n\
-  {d}Permissions{r}      {}\n\
-  {d}Branch{r}           {}\n\
-  {d}Workspace{r}        {}\n\
-  {d}Directory{r}        {}\n\
-  {d}Session{r}          {}\n\
-  {d}Auto-save{r}        {}\n\n\
-  Type \x1b[1m/help{r} for commands · \x1b[1m/status{r} for live context · {d}/resume latest{r} jumps back to the newest session · \x1b[1m/diff{r} then \x1b[1m/commit{r} to ship · {d}Tab{r} for workflow completions · {d}Shift+Enter{r} for newline",
-            self.model,
-            self.permission_mode.as_str(),
-            git_branch,
-            workspace,
-            cwd,
-            self.session.id,
-            session_path,
-            d = Theme::DIM,
-            r = Theme::RESET,
+            "{accent}ninmu{reset} {muted}ニンムコード{reset}\n\
+             {muted}  model      {reset} {model}\n\
+             {muted}  perm       {reset} {perm}\n\
+             {muted}  branch     {reset} {branch}\n\
+             {muted}  workspace  {reset} {workspace}\n\
+             {muted}  directory  {reset} {cwd}\n\
+             {muted}  session    {reset} {session_id}\n\
+             {muted}  auto-save  {reset} {session_path}\n\n\
+             {muted}/help{reset} · {muted}/diff{reset} {muted}/commit{reset} · {muted}Tab{reset}",
+            accent = Theme::ACCENT,
+            muted = Theme::MUTED,
+            reset = Theme::RESET,
+            model = self.model,
+            perm = self.permission_mode.as_str(),
+            branch = git_branch,
+            workspace = workspace,
+            cwd = cwd,
+            session_id = self.session.id,
+            session_path = session_path,
         )
     }
 
@@ -199,18 +194,19 @@ impl LiveCli {
             .and_then(|context| context.git_branch.as_deref())
             .unwrap_or("unknown");
         format!(
-            "\x1b[38;5;208mNinmu\x1b[0m 🦞  \
-             {d}model{r} {}  \
-             {d}perm{r} {}  \
-             {d}branch{r} {}\n\
-             {d}{}/  \
-             Type \x1b[1m/help\x1b[0m for commands · \x1b[1m/diff\x1b[0m then \x1b[1m/commit\x1b[0m to ship · {d}Tab{r} for completions{r}",
-            self.model,
-            self.permission_mode.as_str(),
-            git_branch,
-            cwd,
-            d = Theme::DIM,
-            r = Theme::RESET,
+            "{accent}ninmu{reset} {muted}ニンムコード{reset}  \
+             {muted}model{reset} {model}  \
+             {muted}perm{reset} {perm}  \
+             {muted}branch{reset} {branch}\n\
+             {muted}{cwd}/{reset}  \
+             {muted}/help{reset} · {muted}/diff{reset} {muted}/commit{reset} · {muted}Tab{reset}",
+            accent = Theme::ACCENT,
+            muted = Theme::MUTED,
+            reset = Theme::RESET,
+            model = self.model,
+            perm = self.permission_mode.as_str(),
+            branch = git_branch,
+            cwd = cwd,
         )
     }
 
