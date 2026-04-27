@@ -2280,6 +2280,9 @@ impl AnthropicRuntimeClient {
                     }
                     ContentBlockDelta::ThinkingDelta { .. } => {
                         if !block_has_thinking_summary {
+                            if let Some(progress_reporter) = &self.progress_reporter {
+                                progress_reporter.mark_reasoning_phase();
+                            }
                             render_thinking_block_summary(out, None, false)?;
                             block_has_thinking_summary = true;
                         }
@@ -2910,6 +2913,26 @@ impl InternalPromptProgressReporter {
             state.step += 1;
             state.phase = format!("running {name}");
             state.detail = Some(detail);
+            state.clone()
+        };
+        self.write_line(&format_internal_prompt_progress_line(
+            InternalPromptProgressEvent::Update,
+            &snapshot,
+            self.elapsed(),
+            None,
+        ));
+    }
+
+    pub(crate) fn mark_reasoning_phase(&self) {
+        let snapshot = {
+            let mut state = self
+                .shared
+                .state
+                .lock()
+                .expect("internal prompt progress state poisoned");
+            state.step += 1;
+            state.phase = "deep reasoning".to_string();
+            state.detail = Some("model is reasoning about the problem".to_string());
             state.clone()
         };
         self.write_line(&format_internal_prompt_progress_line(

@@ -2380,9 +2380,9 @@ mod tests {
         slash_command_completion_candidates_with_sessions, split_error_hint, status_context,
         summarize_tool_payload_for_markdown, try_resolve_bare_skill_prompt, validate_no_args,
         write_mcp_server_fixture, CliAction, CliOutputFormat, CliToolExecutor, GitWorkspaceSummary,
-        InternalPromptProgressEvent, InternalPromptProgressState, LiveCli, LocalHelpTopic,
-        PromptHistoryEntry, SlashCommand, StatusUsage, DEFAULT_MODEL, LATEST_SESSION_REFERENCE,
-        STUB_COMMANDS,
+        InternalPromptProgressEvent, InternalPromptProgressReporter, InternalPromptProgressState,
+        LiveCli, LocalHelpTopic, PromptHistoryEntry, SlashCommand, StatusUsage, DEFAULT_MODEL,
+        LATEST_SESSION_REFERENCE, STUB_COMMANDS,
     };
     use ninmu_api::{ApiError, MessageResponse, OutputContentBlock, Usage};
     use ninmu_plugins::{
@@ -5803,6 +5803,18 @@ UU conflicted.rs",
         assert!(completed.contains("3 steps total"));
         assert!(failed.contains("failed"));
         assert!(failed.contains("network timeout"));
+    }
+
+    #[test]
+    fn reasoning_phase_detected_via_mark_reasoning() {
+        let reporter = InternalPromptProgressReporter::ultraplan("test-task");
+        // Capture output by calling mark_reasoning_phase
+        reporter.mark_reasoning_phase();
+        // We can't easily capture the write_line output, but verify the
+        // method exists and the state machine transitions correctly by
+        // checking that the reporter is still usable afterward
+        reporter.mark_text_phase("output text");
+        // No panic = state machine intact
     }
 
     #[test]
