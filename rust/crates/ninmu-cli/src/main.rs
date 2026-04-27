@@ -45,6 +45,7 @@ use ninmu_api::{
     StreamEvent as ApiStreamEvent, ToolChoice, ToolDefinition, ToolResultContentBlock,
 };
 
+use init::initialize_repo;
 use ninmu_commands::{
     classify_skills_slash_command, handle_agents_slash_command, handle_agents_slash_command_json,
     handle_mcp_slash_command, handle_mcp_slash_command_json, handle_plugins_slash_command,
@@ -53,9 +54,7 @@ use ninmu_commands::{
     slash_command_specs, validate_slash_command_input, SkillSlashDispatch, SlashCommand,
 };
 use ninmu_compat_harness::{extract_manifest, UpstreamPaths};
-use init::initialize_repo;
 use ninmu_plugins::{PluginHooks, PluginManager, PluginManagerConfig, PluginRegistry};
-use render::{MarkdownStreamState, Spinner, TerminalRenderer};
 use ninmu_runtime::{
     check_base_commit, format_stale_base_warning, format_usd, load_oauth_credentials,
     load_system_prompt, pricing_for_model, resolve_expected_base, resolve_sandbox_status,
@@ -65,11 +64,12 @@ use ninmu_runtime::{
     ProjectContext, PromptCacheEvent, ResolvedPermissionMode, RuntimeError, Session, TokenUsage,
     ToolError, ToolExecutor, UsageTracker,
 };
-use serde::Deserialize;
-use serde_json::{json, Map, Value};
 use ninmu_tools::{
     execute_tool, mvp_tool_specs, GlobalToolRegistry, RuntimeToolDefinition, ToolSearchOutput,
 };
+use render::{MarkdownStreamState, Spinner, TerminalRenderer};
+use serde::Deserialize;
+use serde_json::{json, Map, Value};
 
 const DEFAULT_MODEL: &str = "claude-opus-4-6";
 
@@ -358,7 +358,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             base_commit,
             reasoning_effort,
             allow_broad_cwd,
-            if tui { Some(crate::app::BannerStyle::None) } else { None },
+            if tui {
+                Some(crate::app::BannerStyle::None)
+            } else {
+                None
+            },
             tui,
         )?,
         CliAction::HelpTopic(topic) => print_help_topic(topic),
@@ -2388,6 +2392,7 @@ mod tests {
         load_oauth_credentials, save_oauth_credentials, AssistantEvent, ConfigLoader, ContentBlock,
         ConversationMessage, MessageRole, OAuthConfig, PermissionMode, Session, ToolExecutor,
     };
+    use ninmu_tools::GlobalToolRegistry;
     use serde_json::json;
     use std::fs;
     use std::io::{Read, Write};
@@ -2397,7 +2402,6 @@ mod tests {
     use std::sync::{Mutex, MutexGuard, OnceLock};
     use std::thread;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
-    use ninmu_tools::GlobalToolRegistry;
 
     fn registry_with_plugin_tool() -> GlobalToolRegistry {
         GlobalToolRegistry::with_plugin_tools(vec![PluginTool::new(
@@ -4189,6 +4193,8 @@ mod tests {
 
     #[test]
     fn parses_direct_agents_mcp_and_skills_slash_commands() {
+        let _guard = env_lock();
+        std::env::remove_var("RUSTY_CLAUDE_PERMISSION_MODE");
         assert_eq!(
             parse_args(&["/agents".to_string()]).expect("/agents should parse"),
             CliAction::Agents {
@@ -4350,6 +4356,8 @@ mod tests {
 
     #[test]
     fn multi_word_prompt_still_bypasses_subcommand_typo_guard() {
+        let _guard = env_lock();
+        std::env::remove_var("RUSTY_CLAUDE_PERMISSION_MODE");
         assert_eq!(
             parse_args(&[
                 "hello".to_string(),
