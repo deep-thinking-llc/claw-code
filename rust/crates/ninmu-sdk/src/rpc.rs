@@ -175,7 +175,7 @@ impl<R: BufRead, W: Write> RpcServer<R, W> {
             model,
             system_prompt,
             ToolRegistry::new(),
-           ninmu_runtime::PermissionMode::DangerFullAccess,
+            ninmu_runtime::PermissionMode::DangerFullAccess,
         )?;
 
         let session_id = session.session_id().to_string();

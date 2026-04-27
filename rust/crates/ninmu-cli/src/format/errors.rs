@@ -227,7 +227,10 @@ pub(crate) fn levenshtein_distance(left: &str, right: &str) -> usize {
     previous[right_chars.len()]
 }
 
-pub(crate) fn format_user_visible_api_error(session_id: &str, error: &ninmu_api::ApiError) -> String {
+pub(crate) fn format_user_visible_api_error(
+    session_id: &str,
+    error: &ninmu_api::ApiError,
+) -> String {
     if error.is_context_window_failure() {
         format_context_window_blocked_error(session_id, error)
     } else if error.is_generic_fatal_wrapper() {
@@ -291,7 +294,9 @@ pub(crate) fn format_context_window_blocked_error(
         }
         ninmu_api::ApiError::RetriesExhausted { last_error, .. } => {
             let detail = match last_error.as_ref() {
-                ninmu_api::ApiError::Api { message, body, .. } => message.as_deref().unwrap_or(body),
+                ninmu_api::ApiError::Api { message, body, .. } => {
+                    message.as_deref().unwrap_or(body)
+                }
                 other => return format_context_window_blocked_error(session_id, other),
             }
             .trim();

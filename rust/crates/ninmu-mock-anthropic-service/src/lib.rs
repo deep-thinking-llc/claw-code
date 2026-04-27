@@ -300,8 +300,8 @@ fn flatten_tool_result_content(content: &[ninmu_api::ToolResultContentBlock]) ->
     content
         .iter()
         .map(|block| match block {
-           ninmu_api::ToolResultContentBlock::Text { text } => text.clone(),
-           ninmu_api::ToolResultContentBlock::Json { value } => value.to_string(),
+            ninmu_api::ToolResultContentBlock::Text { text } => text.clone(),
+            ninmu_api::ToolResultContentBlock::Json { value } => value.to_string(),
         })
         .collect::<Vec<_>>()
         .join("\n")

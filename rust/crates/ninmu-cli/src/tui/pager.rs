@@ -262,7 +262,11 @@ mod tests {
         let page_size = 20usize;
         let max_offset = total_lines.saturating_sub(page_size);
         let offset = 0usize;
-        let pct = if max_offset > 0 { (offset as f64 / max_offset as f64 * 100.0) as u8 } else { 100 };
+        let pct = if max_offset > 0 {
+            (offset as f64 / max_offset as f64 * 100.0) as u8
+        } else {
+            100
+        };
         assert_eq!(pct, 0);
     }
 
@@ -272,7 +276,11 @@ mod tests {
         let page_size = 20usize;
         let max_offset = total_lines.saturating_sub(page_size);
         let offset = 40usize;
-        let pct = if max_offset > 0 { (offset as f64 / max_offset as f64 * 100.0) as u8 } else { 100 };
+        let pct = if max_offset > 0 {
+            (offset as f64 / max_offset as f64 * 100.0) as u8
+        } else {
+            100
+        };
         assert_eq!(pct, 50);
     }
 
@@ -282,7 +290,11 @@ mod tests {
         let page_size = 20usize;
         let max_offset = total_lines.saturating_sub(page_size);
         let offset = max_offset;
-        let pct = if max_offset > 0 { (offset as f64 / max_offset as f64 * 100.0) as u8 } else { 100 };
+        let pct = if max_offset > 0 {
+            (offset as f64 / max_offset as f64 * 100.0) as u8
+        } else {
+            100
+        };
         assert_eq!(pct, 100);
     }
 
@@ -292,7 +304,11 @@ mod tests {
         let page_size = 20usize;
         let max_offset = total_lines.saturating_sub(page_size);
         let offset = max_offset;
-        let pct = if max_offset > 0 { (offset as f64 / max_offset as f64 * 100.0) as u8 } else { 100 };
+        let pct = if max_offset > 0 {
+            (offset as f64 / max_offset as f64 * 100.0) as u8
+        } else {
+            100
+        };
         assert_eq!(pct, 100);
     }
 }

@@ -69,7 +69,7 @@ fn e2e_load_models_json_and_find_custom_model() {
         models_file::find_custom_model("qwen2.5-coder:7b").expect("should find by bare ID");
     assert_eq!(found2.provider_label, "ollama");
 
-    let max_tokens =ninmu_api::max_tokens_for_model("qwen2.5-coder:7b");
+    let max_tokens = ninmu_api::max_tokens_for_model("qwen2.5-coder:7b");
     assert_eq!(max_tokens, 8192);
 
     fs::remove_dir_all(&dir).expect("cleanup");

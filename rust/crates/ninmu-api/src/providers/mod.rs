@@ -920,7 +920,7 @@ mod tests {
         .expect("write plugin settings");
 
         // when
-        let loaded =ninmu_runtime::ConfigLoader::new(&cwd, &home)
+        let loaded = ninmu_runtime::ConfigLoader::new(&cwd, &home)
             .load()
             .expect("config should load");
         let plugin_override = loaded.plugins().max_output_tokens();

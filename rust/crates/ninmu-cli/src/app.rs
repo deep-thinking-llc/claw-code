@@ -40,11 +40,11 @@ use ninmu_runtime::{
     ProjectContext, PromptCacheEvent, ResolvedPermissionMode, RuntimeError, Session, TokenUsage,
     ToolError, ToolExecutor, UsageTracker,
 };
-use serde::Deserialize;
-use serde_json::{json, Map, Value};
 use ninmu_tools::{
     execute_tool, mvp_tool_specs, GlobalToolRegistry, RuntimeToolDefinition, ToolSearchOutput,
 };
+use serde::Deserialize;
+use serde_json::{json, Map, Value};
 
 use crate::args::*;
 use crate::format::*;
@@ -1377,7 +1377,8 @@ pub(crate) struct RuntimeMcpState {
 impl RuntimeMcpState {
     fn new(
         runtime_config: &ninmu_runtime::RuntimeConfig,
-    ) -> Result<Option<(Self, ninmu_runtime::McpToolDiscoveryReport)>, Box<dyn std::error::Error>> {
+    ) -> Result<Option<(Self, ninmu_runtime::McpToolDiscoveryReport)>, Box<dyn std::error::Error>>
+    {
         let mut manager = McpServerManager::from_runtime_config(runtime_config);
         if manager.server_names().is_empty() && manager.unsupported_servers().is_empty() {
             return Ok(None);
@@ -1409,38 +1410,37 @@ impl RuntimeMcpState {
             .into_iter()
             .filter(|server_name| !failed_server_names.contains(server_name))
             .collect::<Vec<_>>();
-        let failed_servers =
-            discovery
-                .failed_servers
-                .iter()
-                .map(|failure| ninmu_runtime::McpFailedServer {
-                    server_name: failure.server_name.clone(),
-                    phase: ninmu_runtime::McpLifecyclePhase::ToolDiscovery,
+        let failed_servers = discovery
+            .failed_servers
+            .iter()
+            .map(|failure| ninmu_runtime::McpFailedServer {
+                server_name: failure.server_name.clone(),
+                phase: ninmu_runtime::McpLifecyclePhase::ToolDiscovery,
+                error: ninmu_runtime::McpErrorSurface::new(
+                    ninmu_runtime::McpLifecyclePhase::ToolDiscovery,
+                    Some(failure.server_name.clone()),
+                    failure.error.clone(),
+                    std::collections::BTreeMap::new(),
+                    true,
+                ),
+            })
+            .chain(discovery.unsupported_servers.iter().map(|server| {
+                ninmu_runtime::McpFailedServer {
+                    server_name: server.server_name.clone(),
+                    phase: ninmu_runtime::McpLifecyclePhase::ServerRegistration,
                     error: ninmu_runtime::McpErrorSurface::new(
-                        ninmu_runtime::McpLifecyclePhase::ToolDiscovery,
-                        Some(failure.server_name.clone()),
-                        failure.error.clone(),
-                        std::collections::BTreeMap::new(),
-                        true,
+                        ninmu_runtime::McpLifecyclePhase::ServerRegistration,
+                        Some(server.server_name.clone()),
+                        server.reason.clone(),
+                        std::collections::BTreeMap::from([(
+                            "transport".to_string(),
+                            format!("{:?}", server.transport).to_ascii_lowercase(),
+                        )]),
+                        false,
                     ),
-                })
-                .chain(discovery.unsupported_servers.iter().map(|server| {
-                    ninmu_runtime::McpFailedServer {
-                        server_name: server.server_name.clone(),
-                        phase: ninmu_runtime::McpLifecyclePhase::ServerRegistration,
-                        error: ninmu_runtime::McpErrorSurface::new(
-                            ninmu_runtime::McpLifecyclePhase::ServerRegistration,
-                            Some(server.server_name.clone()),
-                            server.reason.clone(),
-                            std::collections::BTreeMap::from([(
-                                "transport".to_string(),
-                                format!("{:?}", server.transport).to_ascii_lowercase(),
-                            )]),
-                            false,
-                        ),
-                    }
-                }))
-                .collect::<Vec<_>>();
+                }
+            }))
+            .collect::<Vec<_>>();
         let degraded_report = (!failed_servers.is_empty()).then(|| {
             ninmu_runtime::McpDegradedReport::new(
                 working_servers,
@@ -1655,7 +1655,9 @@ pub(crate) fn build_runtime_mcp_state(
     Ok((Some(Arc::new(Mutex::new(mcp_state))), runtime_tools))
 }
 
-pub(crate) fn mcp_runtime_tool_definition(tool: &ninmu_runtime::ManagedMcpTool) -> RuntimeToolDefinition {
+pub(crate) fn mcp_runtime_tool_definition(
+    tool: &ninmu_runtime::ManagedMcpTool,
+) -> RuntimeToolDefinition {
     RuntimeToolDefinition {
         name: tool.qualified_name.clone(),
         description: Some(
@@ -2009,12 +2011,14 @@ impl ninmu_runtime::PermissionPrompter for CliPermissionPrompter {
                     // Re-prompt
                     self.decide(request)
                 }
-                PermissionDecision::Deny { reason: _ } => ninmu_runtime::PermissionPromptDecision::Deny {
-                    reason: format!(
-                        "tool '{}' denied by user approval prompt",
-                        request.tool_name
-                    ),
-                },
+                PermissionDecision::Deny { reason: _ } => {
+                    ninmu_runtime::PermissionPromptDecision::Deny {
+                        reason: format!(
+                            "tool '{}' denied by user approval prompt",
+                            request.tool_name
+                        ),
+                    }
+                }
             },
             Err(error) => ninmu_runtime::PermissionPromptDecision::Deny {
                 reason: format!("permission approval failed: {error}"),

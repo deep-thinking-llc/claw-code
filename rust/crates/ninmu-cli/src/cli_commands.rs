@@ -34,8 +34,8 @@ use ninmu_runtime::{
     ProjectContext, PromptCacheEvent, ResolvedPermissionMode, RuntimeError, Session, TokenUsage,
     ToolError, ToolExecutor, UsageTracker,
 };
-use serde_json::{json, Map, Value};
 use ninmu_tools::{execute_tool, mvp_tool_specs, GlobalToolRegistry};
+use serde_json::{json, Map, Value};
 
 // ---------------------------------------------------------------------------
 // Constants referenced by functions below — imported from crate root (main.rs)
@@ -2429,7 +2429,10 @@ fn check_sandbox_health(status: &ninmu_runtime::SandboxStatus) -> DiagnosticChec
     ]))
 }
 
-fn check_system_health(cwd: &Path, config: Option<&ninmu_runtime::RuntimeConfig>) -> DiagnosticCheck {
+fn check_system_health(
+    cwd: &Path,
+    config: Option<&ninmu_runtime::RuntimeConfig>,
+) -> DiagnosticCheck {
     let default_model = config.and_then(ninmu_runtime::RuntimeConfig::model);
     let mut details = vec![
         format!("OS               {} {}", env::consts::OS, env::consts::ARCH),

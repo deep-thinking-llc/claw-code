@@ -9,7 +9,6 @@ use ninmu_api::{
     StreamEvent as ApiStreamEvent, ToolChoice, ToolDefinition, ToolResultContentBlock,
 };
 use ninmu_plugins::PluginTool;
-use reqwest::blocking::Client;
 use ninmu_runtime::{
     check_freshness, dedupe_superseded_commit_events, edit_file, execute_bash, glob_search,
     grep_search, load_system_prompt,
@@ -28,6 +27,7 @@ use ninmu_runtime::{
     PermissionPolicy, PromptCacheEvent, ProviderFallbackConfig, RuntimeError, Session, TaskPacket,
     ToolError, ToolExecutor,
 };
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -6915,7 +6915,7 @@ mod tests {
             permissions,
             vec![(
                 "mcp__demo__echo".to_string(),
-               ninmu_runtime::PermissionMode::ReadOnly
+                ninmu_runtime::PermissionMode::ReadOnly
             )]
         );
 
@@ -6929,7 +6929,7 @@ mod tests {
                     server_name: "pending-server".to_string(),
                     phase: ninmu_runtime::McpLifecyclePhase::ToolDiscovery,
                     error: ninmu_runtime::McpErrorSurface::new(
-                       ninmu_runtime::McpLifecyclePhase::ToolDiscovery,
+                        ninmu_runtime::McpLifecyclePhase::ToolDiscovery,
                         Some("pending-server".to_string()),
                         "tool discovery failed",
                         BTreeMap::new(),

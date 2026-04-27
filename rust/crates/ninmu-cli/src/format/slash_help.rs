@@ -265,11 +265,11 @@ pub(crate) fn print_help_to(out: &mut impl Write) -> io::Result<()> {
         "  ninmu [--model MODEL] [--allowedTools TOOL[,TOOL...]]"
     )?;
     writeln!(out, "      Start the interactive REPL")?;
+    writeln!(out, "  ninmu --tui [--model MODEL]")?;
     writeln!(
         out,
-        "  ninmu --tui [--model MODEL]"
+        "      Full-screen TUI mode (alternate screen, experimental)"
     )?;
-    writeln!(out, "      Full-screen TUI mode (alternate screen, experimental)")?;
     writeln!(
         out,
         "  ninmu [--model MODEL] [--output-format text|json] prompt TEXT"

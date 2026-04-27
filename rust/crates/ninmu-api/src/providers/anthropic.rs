@@ -8,9 +8,9 @@ use ninmu_runtime::{
     load_oauth_credentials, save_oauth_credentials, OAuthConfig, OAuthRefreshRequest,
     OAuthTokenExchangeRequest,
 };
+use ninmu_telemetry::{AnalyticsEvent, AnthropicRequestProfile, ClientIdentity, SessionTracer};
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use ninmu_telemetry::{AnalyticsEvent, AnthropicRequestProfile, ClientIdentity, SessionTracer};
 
 use crate::error::ApiError;
 use crate::http_client::build_http_client_or_default;
@@ -1194,7 +1194,7 @@ mod tests {
             .expect("resolve refreshed token")
             .expect("token set present");
         assert_eq!(resolved.access_token, "refreshed-token");
-        let stored =ninmu_runtime::load_oauth_credentials()
+        let stored = ninmu_runtime::load_oauth_credentials()
             .expect("load stored credentials")
             .expect("stored token set");
         assert_eq!(stored.access_token, "refreshed-token");
@@ -1251,7 +1251,7 @@ mod tests {
             .expect("token set present");
         assert_eq!(resolved.access_token, "refreshed-token");
         assert_eq!(resolved.refresh_token.as_deref(), Some("refresh-token"));
-        let stored =ninmu_runtime::load_oauth_credentials()
+        let stored = ninmu_runtime::load_oauth_credentials()
             .expect("load stored credentials")
             .expect("stored token set");
         assert_eq!(stored.refresh_token.as_deref(), Some("refresh-token"));

@@ -13,12 +13,12 @@
     clippy::uninlined_format_args
 )]
 
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use ninmu_api::{
     build_chat_completion_request, flatten_tool_result_content, is_reasoning_model,
     translate_message, InputContentBlock, InputMessage, MessageRequest, OpenAiCompatConfig,
     ToolResultContentBlock,
 };
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use serde_json::json;
 
 /// Create a sample message request with various content types

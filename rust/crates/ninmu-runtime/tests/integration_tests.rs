@@ -334,7 +334,7 @@ fn worker_provider_failure_flows_through_recovery_to_policy() {
         ctx.events().iter().any(|e| {
             matches!(
                 e,
-               ninmu_runtime::recovery_recipes::RecoveryEvent::RecoveryAttempted {
+                ninmu_runtime::recovery_recipes::RecoveryEvent::RecoveryAttempted {
                     result: RecoveryResult::Recovered { steps_taken: 1 },
                     ..
                 }

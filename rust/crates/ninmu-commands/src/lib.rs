@@ -2341,7 +2341,7 @@ pub fn handle_agents_slash_command_json(args: Option<&str>, cwd: &Path) -> std::
 pub fn handle_mcp_slash_command(
     args: Option<&str>,
     cwd: &Path,
-) -> Result<String,ninmu_runtime::ConfigError> {
+) -> Result<String, ninmu_runtime::ConfigError> {
     let loader = ConfigLoader::default_for(cwd);
     render_mcp_report_for(&loader, cwd, args)
 }
@@ -2349,7 +2349,7 @@ pub fn handle_mcp_slash_command(
 pub fn handle_mcp_slash_command_json(
     args: Option<&str>,
     cwd: &Path,
-) -> Result<Value,ninmu_runtime::ConfigError> {
+) -> Result<Value, ninmu_runtime::ConfigError> {
     let loader = ConfigLoader::default_for(cwd);
     render_mcp_report_json_for(&loader, cwd, args)
 }
@@ -2541,7 +2541,7 @@ fn render_mcp_report_for(
     loader: &ConfigLoader,
     cwd: &Path,
     args: Option<&str>,
-) -> Result<String,ninmu_runtime::ConfigError> {
+) -> Result<String, ninmu_runtime::ConfigError> {
     if let Some(args) = normalize_optional_args(args) {
         if let Some(help_path) = help_path_from_args(args) {
             return Ok(match help_path.as_slice() {
@@ -2604,7 +2604,7 @@ fn render_mcp_report_json_for(
     loader: &ConfigLoader,
     cwd: &Path,
     args: Option<&str>,
-) -> Result<Value,ninmu_runtime::ConfigError> {
+) -> Result<Value, ninmu_runtime::ConfigError> {
     if let Some(args) = normalize_optional_args(args) {
         if let Some(help_path) = help_path_from_args(args) {
             return Ok(match help_path.as_slice() {
