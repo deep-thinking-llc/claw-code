@@ -85,7 +85,7 @@ fn build_conversation_request(turns: usize) -> MessageRequest {
     ]);
 
     MessageRequest {
-        model: "ollama/qwen2.5-coder:7b".to_string(),
+        model: "ollama/gemma4:latest".to_string(),
         max_tokens: 1024,
         messages,
         stream: false,
