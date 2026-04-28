@@ -156,7 +156,7 @@ impl SecretScrubber {
                     .iter()
                     .any(|s| k.to_ascii_uppercase().ends_with(s))
                 {
-                    if v.len() <= 6 {
+                    if v.len() <= 8 {
                         (k, "[REDACTED]".to_string())
                     } else {
                         let visible = v.chars().take(4).collect::<String>();
@@ -267,9 +267,13 @@ impl AuditLog {
     }
 
     /// Create an audit log that also persists to a JSONL file.
-    pub fn file(path: impl Into<PathBuf>) -> Result<Self, String> {
-        let path = path.into();
-        if let Some(parent) = path.parent() {
+    pub fn file(filename: &str) -> Result<Self, String> {
+        if filename.contains('/') || filename.contains('\\') {
+            return Err("invalid filename: path separators not allowed".to_string());
+        }
+        let path = PathBuf::from(".claw").join(filename);
+        let parent = path.parent().expect("parent exists");
+        if !parent.exists() {
             fs::create_dir_all(parent)
                 .map_err(|e| format!("failed to create audit log dir: {e}"))?;
         }
@@ -486,7 +490,7 @@ mod tests {
 
     #[test]
     fn audit_log_file_persistence() {
-        let tmp = std::env::temp_dir().join(format!("audit-{}.jsonl", std::process::id()));
+        let tmp = format!("audit-{}.jsonl", std::process::id());
         {
             let mut log = AuditLog::file(&tmp).expect("file log");
             log.append(AuditEntry::new(
@@ -500,7 +504,7 @@ mod tests {
             assert_eq!(log.len(), 1);
             assert_eq!(log.filter(AuditEvent::FileModified).len(), 1);
         }
-        let _ = fs::remove_file(&tmp);
+        let _ = fs::remove_file(PathBuf::from(".claw").join(&tmp));
     }
 
     #[test]
@@ -562,5 +566,25 @@ mod tests {
         let log = AuditLog::in_memory();
         let empty = log.filter(AuditEvent::FileDeleted);
         assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn audit_log_path_traversal_blocked() {
+        let result = AuditLog::file("../../etc/passwd");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("path separators"));
+    }
+
+    #[test]
+    fn secret_scrubber_short_secret_fully_redacted() {
+        let env = vec![
+            ("ANTHROPIC_API_KEY".to_string(), "short".to_string()),
+            ("OPENAI_API_KEY".to_string(), "12345678".to_string()),
+            ("LONG_SECRET".to_string(), "1234567890".to_string()),
+        ];
+        let scrubbed = SecretScrubber::scrub_env(&env);
+        assert_eq!(scrubbed[0].1, "[REDACTED]");   // 5 chars -> fully redacted
+        assert_eq!(scrubbed[1].1, "[REDACTED]");   // 8 chars -> fully redacted (threshold)
+        assert!(scrubbed[2].1.starts_with("1234")); // 10 chars -> prefix visible
     }
 }

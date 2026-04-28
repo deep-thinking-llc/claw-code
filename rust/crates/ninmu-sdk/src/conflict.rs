@@ -48,7 +48,7 @@ fn sha256(content: &str) -> String {
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
+        .expect("system clock before epoch")
         .as_millis() as u64
 }
 
@@ -164,6 +164,23 @@ impl MergeEngine {
             .filter(|(i, line)| base_lines.get(*i) != Some(line))
             .map(|(i, _)| i)
             .collect();
+
+        // Conservative: if file lengths differ significantly from base in opposite
+        // directions, this implies deletions vs additions and we should conflict.
+        let our_len_diff = our_lines.len() as i64 - base_lines.len() as i64;
+        let their_len_diff = their_lines.len() as i64 - base_lines.len() as i64;
+        if our_len_diff.signum() != 0
+            && their_len_diff.signum() != 0
+            && our_len_diff.signum() != their_len_diff.signum()
+            && our_len_diff.abs().max(their_len_diff.abs()) > 1
+        {
+            return Err(MergeConflict {
+                path: String::new(),
+                description: format!(
+                    "conflict: our_len_diff={our_len_diff}, their_len_diff={their_len_diff}"
+                ),
+            });
+        }
 
         // Check for overlap (any changed line index appears in both)
         let overlap: Vec<usize> = our_changes
@@ -292,5 +309,15 @@ mod tests {
         let ours = "new content";
         let result = MergeEngine::auto_merge(base, ours, "").unwrap();
         assert_eq!(result, ours);
+    }
+
+    #[test]
+    fn auto_merge_with_deletions_returns_conflict() {
+        // base has 5 lines, ours deletes 2, theirs adds 1
+        let base = "a\nb\nc\nd\ne";
+        let ours = "a\nb\nc";
+        let theirs = "a\nb\nc\nd\ne\nf";
+        let result = MergeEngine::auto_merge(base, ours, theirs);
+        assert!(result.is_err(), "opposite-direction changes should conflict");
     }
 }

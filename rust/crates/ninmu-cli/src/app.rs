@@ -345,6 +345,26 @@ impl LiveCli {
         }
     }
 
+    /// Run a turn without printing to stdout. Returns the assistant's
+    /// final text response. Used by the TUI which manages its own screen.
+    pub(crate) fn run_turn_text(&mut self, input: &str) -> Result<String, Box<dyn std::error::Error>> {
+        let expansion = crate::file_ref::expand_file_refs(input);
+        let input = expansion.expanded;
+        let (mut runtime, hook_abort_monitor) = self.prepare_turn_runtime(false)?;
+        let mut permission_prompter = CliPermissionPrompter::new(self.permission_mode);
+        let result = runtime.run_turn(input, Some(&mut permission_prompter));
+        hook_abort_monitor.stop();
+        let summary = result?;
+        let text = final_assistant_text(&summary);
+        self.replace_runtime(runtime)?;
+        self.persist_session()?;
+        if let Some(event) = summary.auto_compaction {
+            let notice = format_auto_compaction_notice(event.removed_message_count);
+            return Ok(format!("{notice}\n{text}"));
+        }
+        Ok(text)
+    }
+
     fn run_prompt_compact(&mut self, input: &str) -> Result<(), Box<dyn std::error::Error>> {
         let (mut runtime, hook_abort_monitor) = self.prepare_turn_runtime(false)?;
         let mut permission_prompter = CliPermissionPrompter::new(self.permission_mode);
@@ -2727,9 +2747,8 @@ fn run_tui_repl(cli: &mut LiveCli) -> Result<(), Box<dyn std::error::Error>> {
             Err(error) => return Ok(format!("error: {error}")),
         }
         cli.record_prompt_history(&trimmed);
-        cli.run_turn(&trimmed)?;
-        cli.persist_session()?;
-        Ok(String::new())
+        let text = cli.run_turn_text(&trimmed)?;
+        Ok(text)
     })?;
     cli.persist_session()?;
     Ok(())
