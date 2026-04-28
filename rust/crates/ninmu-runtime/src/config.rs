@@ -1403,6 +1403,68 @@ fn push_unique(target: &mut Vec<String>, value: String) {
     }
 }
 
+/// Merge provider-specific defaults into a request's `max_tokens`, temperature,
+/// `top_p`, and `reasoning_effort` fields. Only fills in values that are `None`
+/// on the request, so explicit CLI flags always take precedence.
+///
+/// Apply per-provider defaults from a full runtime config. Fills in any
+/// unset request parameters with provider-specific defaults.
+pub fn apply_provider_defaults(
+    max_tokens: &mut Option<u32>,
+    temperature: &mut Option<f64>,
+    top_p: &mut Option<f64>,
+    reasoning_effort: &mut Option<String>,
+    model: &str,
+    config: &RuntimeConfig,
+) {
+    apply_provider_defaults_from_map(
+        max_tokens,
+        temperature,
+        top_p,
+        reasoning_effort,
+        model,
+        config.provider_defaults(),
+    );
+}
+
+/// Apply per-provider defaults from a pre-extracted provider defaults map.
+/// Fills in any unset request parameters with provider-specific defaults.
+pub fn apply_provider_defaults_from_map(
+    max_tokens: &mut Option<u32>,
+    temperature: &mut Option<f64>,
+    top_p: &mut Option<f64>,
+    reasoning_effort: &mut Option<String>,
+    model: &str,
+    provider_defaults: &std::collections::BTreeMap<String, ProviderDefaultConfig>,
+) {
+    let lower = model.to_ascii_lowercase();
+    // Try exact provider label match first, then prefix match
+    let defaults = provider_defaults.get(&lower).or_else(|| {
+        provider_defaults.iter().find_map(|(key, defaults)| {
+            if lower.starts_with(key.as_str()) {
+                Some(defaults)
+            } else {
+                None
+            }
+        })
+    });
+    let Some(defaults) = defaults else {
+        return;
+    };
+    if max_tokens.is_none() {
+        *max_tokens = defaults.max_tokens;
+    }
+    if temperature.is_none() {
+        *temperature = defaults.temperature_f64();
+    }
+    if top_p.is_none() {
+        *top_p = defaults.top_p_f64();
+    }
+    if reasoning_effort.is_none() {
+        reasoning_effort.clone_from(&defaults.reasoning_effort);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -2331,7 +2393,7 @@ mod tests {
         let home = root.join("home").join(".claw");
         fs::create_dir_all(&cwd).expect("create cwd");
         fs::create_dir_all(&home).expect("create home");
-        fs::write(home.join("settings.json"), r#"{}"#).expect("write");
+        fs::write(home.join("settings.json"), r"{}").expect("write");
 
         let loader = ConfigLoader::new(&cwd, &home);
         let config = loader.load().expect("load");
@@ -2450,66 +2512,5 @@ mod tests {
         assert_eq!(temperature, None);
         assert_eq!(top_p, None);
         assert_eq!(reasoning_effort, None);
-    }
-}
-
-/// Merge provider-specific defaults into a request's max_tokens, temperature,
-/// top_p, and reasoning_effort fields. Only fills in values that are `None`
-/// on the request, so explicit CLI flags always take precedence.
-/// Apply per-provider defaults from a full runtime config. Fills in any
-/// unset request parameters with provider-specific defaults.
-pub fn apply_provider_defaults(
-    max_tokens: &mut Option<u32>,
-    temperature: &mut Option<f64>,
-    top_p: &mut Option<f64>,
-    reasoning_effort: &mut Option<String>,
-    model: &str,
-    config: &RuntimeConfig,
-) {
-    apply_provider_defaults_from_map(
-        max_tokens,
-        temperature,
-        top_p,
-        reasoning_effort,
-        model,
-        config.provider_defaults(),
-    );
-}
-
-/// Apply per-provider defaults from a pre-extracted provider defaults map.
-/// Fills in any unset request parameters with provider-specific defaults.
-pub fn apply_provider_defaults_from_map(
-    max_tokens: &mut Option<u32>,
-    temperature: &mut Option<f64>,
-    top_p: &mut Option<f64>,
-    reasoning_effort: &mut Option<String>,
-    model: &str,
-    provider_defaults: &std::collections::BTreeMap<String, ProviderDefaultConfig>,
-) {
-    let lower = model.to_ascii_lowercase();
-    // Try exact provider label match first, then prefix match
-    let defaults = provider_defaults.get(&lower).or_else(|| {
-        provider_defaults.iter().find_map(|(key, defaults)| {
-            if lower.starts_with(key.as_str()) {
-                Some(defaults)
-            } else {
-                None
-            }
-        })
-    });
-    let Some(defaults) = defaults else {
-        return;
-    };
-    if max_tokens.is_none() {
-        *max_tokens = defaults.max_tokens;
-    }
-    if temperature.is_none() {
-        *temperature = defaults.temperature_f64();
-    }
-    if top_p.is_none() {
-        *top_p = defaults.top_p_f64();
-    }
-    if reasoning_effort.is_none() {
-        *reasoning_effort = defaults.reasoning_effort.clone();
     }
 }

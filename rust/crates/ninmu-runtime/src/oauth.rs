@@ -102,6 +102,7 @@ pub struct OAuthFlowStore {
 }
 
 impl OAuthFlowStore {
+    #[must_use]
     pub fn new(max_age: Duration) -> Self {
         Self {
             flows: Arc::new(Mutex::new(HashMap::new())),
@@ -394,7 +395,7 @@ pub fn parse_oauth_callback_query(query: &str) -> Result<OAuthCallbackParams, St
 fn generate_random_token(bytes: usize) -> io::Result<String> {
     let mut buffer = vec![0_u8; bytes];
     getrandom::getrandom(&mut buffer)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| io::Error::other(e.to_string()))?;
     Ok(base64url_encode(&buffer))
 }
 
@@ -651,7 +652,7 @@ mod tests {
 
     #[test]
     fn valid_state_exchanges() {
-        let store = OAuthFlowStore::new(Duration::from_secs(600));
+        let store = OAuthFlowStore::new(Duration::from_mins(10));
         store.register(PendingOAuthFlow {
             state: "state-123".to_string(),
             code_verifier: "verifier-abc".to_string(),
@@ -665,7 +666,7 @@ mod tests {
 
     #[test]
     fn mismatched_state_rejected() {
-        let store = OAuthFlowStore::new(Duration::from_secs(600));
+        let store = OAuthFlowStore::new(Duration::from_mins(10));
         store.register(PendingOAuthFlow {
             state: "state-real".to_string(),
             code_verifier: "verifier-abc".to_string(),
@@ -679,7 +680,7 @@ mod tests {
 
     #[test]
     fn missing_state_rejected() {
-        let store = OAuthFlowStore::new(Duration::from_secs(600));
+        let store = OAuthFlowStore::new(Duration::from_mins(10));
         let result = parse_oauth_callback_request_target("/callback?code=abc", &store);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("missing state"));
@@ -702,7 +703,7 @@ mod tests {
 
     #[test]
     fn replay_state_rejected() {
-        let store = OAuthFlowStore::new(Duration::from_secs(600));
+        let store = OAuthFlowStore::new(Duration::from_mins(10));
         store.register(PendingOAuthFlow {
             state: "replay-state".to_string(),
             code_verifier: "verifier-abc".to_string(),

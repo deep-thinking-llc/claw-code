@@ -1,12 +1,10 @@
 #![allow(clippy::doc_markdown, clippy::uninlined_format_args)]
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use ninmu_plugins::{
     load_plugin_from_directory, HookRunner, PluginHooks, PluginManager, PluginManagerConfig,
-    PluginTool,
 };
 
 fn temp_dir(label: &str) -> PathBuf {
@@ -259,7 +257,7 @@ fn install_from_local_path() {
 fn enable_disable_toggles_hooks() {
     let config_home = temp_dir("toggle-cfg");
 
-    let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+    let manager = PluginManager::new(PluginManagerConfig::new(&config_home));
 
     let hooks = manager.aggregated_hooks();
     assert!(hooks.is_ok(), "should aggregate hooks even with no plugins");

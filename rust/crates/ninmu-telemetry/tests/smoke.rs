@@ -12,8 +12,8 @@ fn telemetry_events_round_trip_through_memory_sink() {
     let sink = std::sync::Arc::new(MemoryTelemetrySink::default());
     let tracer = SessionTracer::new("integration-session", sink.clone());
 
-    tracer.record_http_request_started(1, "POST", "/v1/messages", Default::default());
-    tracer.record_http_request_succeeded(1, "POST", "/v1/messages", 200, None, Default::default());
+    tracer.record_http_request_started(1, "POST", "/v1/messages", serde_json::Map::default());
+    tracer.record_http_request_succeeded(1, "POST", "/v1/messages", 200, None, serde_json::Map::default());
     tracer.record_analytics(
         AnalyticsEvent::new("cli", "turn_completed").with_property("ok", serde_json::json!(true)),
     );
@@ -40,7 +40,7 @@ fn telemetry_events_round_trip_through_memory_sink() {
 #[test]
 fn client_identity_default_is_populated() {
     let identity = ClientIdentity::default();
-    assert!(identity.app_name.len() > 0);
-    assert!(identity.app_version.len() > 0);
+    assert!(!identity.app_name.is_empty());
+    assert!(!identity.app_version.is_empty());
     assert_eq!(identity.runtime, "rust");
 }

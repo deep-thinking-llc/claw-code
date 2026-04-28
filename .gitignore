@@ -18,5 +18,7 @@ _docs/
 # Implementation pass documents (auto-generated)
 docs/implementation_pass.md
 
+DESIGN.md
+
 # macOS
 .DS_Store

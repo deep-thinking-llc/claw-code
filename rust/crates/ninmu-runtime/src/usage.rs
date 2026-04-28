@@ -427,6 +427,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn deepseek_models_have_correct_pricing() {
         let usage = TokenUsage {
             input_tokens: 1_000_000,
@@ -455,6 +456,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn local_providers_have_zero_cost_pricing() {
         let usage = TokenUsage {
             input_tokens: 1_000_000,

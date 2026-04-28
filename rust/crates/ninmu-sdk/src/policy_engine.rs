@@ -3,8 +3,6 @@
 //! The [`PolicyEngine`] evaluates actions against a registry of policies
 //! and returns a decision: allow, request approval, or deny.
 
-use std::collections::HashMap;
-
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
