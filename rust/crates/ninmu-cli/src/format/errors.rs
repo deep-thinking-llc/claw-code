@@ -34,9 +34,9 @@ pub(crate) fn classify_error_kind(message: &str) -> &'static str {
     }
 }
 
-/// #77: Split a multi-line error message into (short_reason, optional_hint).
+/// #77: Split a multi-line error message into (`short_reason`, `optional_hint`).
 ///
-/// The short_reason is the first line (up to the first newline), and the hint
+/// The `short_reason` is the first line (up to the first newline), and the hint
 /// is the remaining text or `None` if there's no newline. This prevents the
 /// runbook prose from being stuffed into the `error` field that downstream
 /// parsers expect to be the short reason alone.
@@ -96,7 +96,7 @@ pub(crate) fn omc_compatibility_note_for_unknown_slash_command(name: &str) -> Op
 }
 
 pub(crate) fn render_suggestion_line(label: &str, suggestions: &[String]) -> Option<String> {
-    (!suggestions.is_empty()).then(|| format!("  {label:<16} {}", suggestions.join(", "),))
+    (!suggestions.is_empty()).then(|| format!("  {label:<16} {}", suggestions.join(", ")))
 }
 
 pub(crate) fn suggest_slash_commands(input: &str) -> Vec<String> {

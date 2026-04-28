@@ -15,7 +15,7 @@ pub struct Scrollback {
     /// Current scroll offset (0 = bottom/newest, N = N lines up).
     scroll_offset: usize,
     /// Entries that can be collapsed/expanded, keyed by starting line index.
-    /// Stores (line_index, full_content_lines, collapsed_summary_lines, is_expanded).
+    /// Stores (`line_index`, `full_content_lines`, `collapsed_summary_lines`, `is_expanded`).
     collapsible_entries: Vec<(usize, Vec<String>, Vec<String>, bool)>,
 }
 
@@ -78,14 +78,12 @@ impl Scrollback {
         let display_lines = if has_hint {
             let extra = full_lines.len() - collapsed_count;
             let hint = format!(
-                "[+] [Tab to expand · {} more lines]",
-                extra
+                "[+] [Tab to expand · {extra} more lines]"
             );
             self.push(hint);
             let mut with_hint = collapsed_lines;
             with_hint.push(format!(
-                "[+] [Tab to expand · {} more lines]",
-                extra
+                "[+] [Tab to expand · {extra} more lines]"
             ));
             with_hint
         } else {
@@ -240,7 +238,7 @@ impl Scrollback {
     }
 
     /// Get a slice of lines for the visible portion, given a viewport height.
-    /// Returns (visible_lines, start_index_in_buffer, total_lines).
+    /// Returns (`visible_lines`, `start_index_in_buffer`, `total_lines`).
     pub fn visible(&self, viewport_height: usize) -> (&[String], usize, usize) {
         if self.lines.is_empty() {
             return (&[], 0, 0);
@@ -339,7 +337,7 @@ mod tests {
             sb.visible(10)
                 .0
                 .iter()
-                .map(|s| s.as_str())
+                .map(std::string::String::as_str)
                 .collect::<Vec<_>>(),
             vec!["line 5", "line 6", "line 7", "line 8", "line 9"]
         );

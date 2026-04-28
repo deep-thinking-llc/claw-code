@@ -38,8 +38,7 @@ impl StatusBar {
         );
 
         let content = format!(
-            " model {}  {} tokens  {}  {}s  {} ",
-            model_display, tokens_display, cost_display, secs, branch_display,
+            " model {model_display}  {tokens_display} tokens  {cost_display}  {secs}s  {branch_display} ",
         );
 
         // Truncate to terminal width (character count, not byte length)

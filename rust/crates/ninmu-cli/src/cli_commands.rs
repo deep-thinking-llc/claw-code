@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::app::*;
-use crate::args::*;
-use crate::format::*;
+use crate::args::CliOutputFormat;
+use crate::format::{parse_git_status_metadata, parse_git_workspace_summary, StatusContext, load_session_reference, classify_error_kind, split_error_hint, render_repl_help, format_compact_report, write_session_clear_backup, new_cli_session, status_context, format_status_report, StatusUsage, default_permission_mode, status_json_value, format_sandbox_report, sandbox_json_value, format_cost_report, parse_history_count, collect_session_prompt_history, render_prompt_history_report, format_unknown_slash_command, list_managed_sessions, render_session_list, print_help_to};
 use crate::tui::diff_view::format_colored_diff;
 use crate::{
     BUILD_TARGET, DEFAULT_DATE, DEPRECATED_INSTALL_COMMAND, GIT_SHA, OFFICIAL_REPO_SLUG,
@@ -462,8 +462,7 @@ pub(crate) fn render_diff_report_for(cwd: &Path) -> Result<String, Box<dyn std::
         .args(["rev-parse", "--is-inside-work-tree"])
         .current_dir(cwd)
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
+        .is_ok_and(|o| o.status.success());
     if !in_git_repo {
         return Ok(format!(
             "Diff\n  Result           no git repository\n  Detail           {} is not inside a git project",
@@ -499,8 +498,7 @@ pub(crate) fn render_diff_json_for(
         .args(["rev-parse", "--is-inside-work-tree"])
         .current_dir(cwd)
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
+        .is_ok_and(|o| o.status.success());
     if !in_git_repo {
         return Ok(serde_json::json!({
             "kind": "diff",
@@ -1657,8 +1655,7 @@ pub(crate) fn command_exists(name: &str) -> bool {
     Command::new("which")
         .arg(name)
         .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+        .is_ok_and(|output| output.status.success())
 }
 
 pub(crate) fn write_temp_text_file(
@@ -2519,7 +2516,7 @@ pub(crate) fn init_claude_md() -> Result<String, Box<dyn std::error::Error>> {
     Ok(crate::init::initialize_repo(&cwd)?.render())
 }
 
-/// STUB_COMMANDS — slash commands registered in the spec list but not yet
+/// `STUB_COMMANDS` — slash commands registered in the spec list but not yet
 /// implemented in this build.
 pub(crate) const STUB_COMMANDS: &[&str] = &[
     "login",

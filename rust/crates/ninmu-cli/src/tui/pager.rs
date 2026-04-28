@@ -156,8 +156,7 @@ impl InternalPager {
             .stdin(std::process::Stdio::piped())
             .spawn()
             .map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
+                io::Error::other(
                     format!("failed to start {pager_cmd}: {e}"),
                 )
             })?;
@@ -168,7 +167,7 @@ impl InternalPager {
 
         let status = child
             .wait()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("pager failed: {e}")))?;
+            .map_err(|e| io::Error::other(format!("pager failed: {e}")))?;
 
         if !status.success() {
             eprintln!("warning: {pager_cmd} exited with status {status}");
@@ -213,7 +212,7 @@ mod tests {
     #[test]
     fn pager_status_bar_renders_scroll_position() {
         let raw_lines: Vec<String> = (0..100).map(|i| format!("line {i}")).collect();
-        let lines: Vec<&str> = raw_lines.iter().map(|s| s.as_str()).collect();
+        let lines: Vec<&str> = raw_lines.iter().map(std::string::String::as_str).collect();
         let total = lines.len();
         let page_size = 20usize;
         let max_offset = total.saturating_sub(page_size);

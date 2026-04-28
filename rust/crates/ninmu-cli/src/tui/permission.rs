@@ -28,8 +28,7 @@ pub fn describe_tool_action(tool_name: &str, input: &serde_json::Value) -> Strin
             let content = input
                 .get("content")
                 .and_then(|v| v.as_str())
-                .map(|c| c.lines().count())
-                .unwrap_or(0);
+                .map_or(0, |c| c.lines().count());
             format!("Write file: {path} ({content} lines)")
         }
         "read_file" | "Read" => {
@@ -37,7 +36,7 @@ pub fn describe_tool_action(tool_name: &str, input: &serde_json::Value) -> Strin
             let start_line = input
                 .get("start")
                 .or_else(|| input.get("startLine"))
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
             format!("Read file: {path} (from line {start_line})")
         }
@@ -87,7 +86,7 @@ pub fn format_enhanced_permission_prompt(
         ),
     ];
     if let Some(reason) = reason {
-        lines.push(format!("  Reason:\t{}", reason));
+        lines.push(format!("  Reason:\t{reason}"));
     }
     lines.push(border);
     lines.push(format!(

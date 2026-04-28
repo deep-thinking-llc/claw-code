@@ -11,7 +11,7 @@ const READ_DISPLAY_MAX_LINES: usize = 80;
 const READ_DISPLAY_MAX_CHARS: usize = 6_000;
 
 /// A callback that applies syntax highlighting to code content.
-/// Takes (content, language_hint) and returns ANSI-highlighted string.
+/// Takes (content, `language_hint`) and returns ANSI-highlighted string.
 pub(crate) type HighlightFn<'a> = Option<&'a dyn Fn(&str, &str) -> String>;
 
 pub(crate) fn format_tool_call_start(name: &str, input: &str) -> String {
@@ -257,10 +257,10 @@ pub(crate) fn format_read_result(
         .unwrap_or("");
 
     let display_content = if let Some(hl) = highlight {
-        if !language.is_empty() {
-            hl(content, language)
-        } else {
+        if language.is_empty() {
             content.to_string()
+        } else {
+            hl(content, language)
         }
     } else {
         content.to_string()

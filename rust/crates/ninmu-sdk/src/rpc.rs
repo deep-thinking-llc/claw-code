@@ -216,7 +216,7 @@ impl<R: BufRead, W: Write> RpcServer<R, W> {
             Ok(summary) => {
                 // Add user + assistant turns to tree atomically on success
                 if let Some(active_id) = managed.tree.active().map(|n| n.id.clone()) {
-                    let turn_id = format!("turn-{}", active_id);
+                    let turn_id = format!("turn-{active_id}");
                     if managed
                         .tree
                         .add_child(&turn_id, &active_id, "user", None)
@@ -295,13 +295,12 @@ impl<R: BufRead, W: Write> RpcServer<R, W> {
         managed
             .tree
             .fork_at(node_id, new_branch_id)
-            .map(|_| {
+            .map(|()| {
                 serde_json::json!({
                     "sessionId": session_id,
                     "activeId": new_branch_id,
                 })
             })
-            .map_err(|e| e)
     }
 
     fn handle_tree_navigate(&mut self, params: &Value) -> Result<Value, String> {
@@ -322,13 +321,12 @@ impl<R: BufRead, W: Write> RpcServer<R, W> {
         managed
             .tree
             .navigate_to(node_id)
-            .map(|_| {
+            .map(|()| {
                 serde_json::json!({
                     "sessionId": session_id,
                     "activeId": node_id,
                 })
             })
-            .map_err(|e| e)
     }
 
     fn handle_tree_path(&mut self, params: &Value) -> Result<Value, String> {

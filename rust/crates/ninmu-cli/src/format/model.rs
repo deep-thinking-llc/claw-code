@@ -14,12 +14,12 @@ pub(crate) const DEFAULT_MODEL: &str = "claude-opus-4-6";
 pub(crate) enum ModelSource {
     /// Explicit `--model` / `--model=` CLI flag.
     Flag,
-    /// ANTHROPIC_MODEL environment variable (when no flag was passed).
+    /// `ANTHROPIC_MODEL` environment variable (when no flag was passed).
     Env,
     /// `model` key in `.claw.json` / `.claw/settings.json` (when neither
     /// flag nor env set it).
     Config,
-    /// Compiled-in DEFAULT_MODEL fallback.
+    /// Compiled-in `DEFAULT_MODEL` fallback.
     Default,
 }
 
@@ -139,8 +139,7 @@ pub(crate) fn validate_model_syntax(model: &str) -> Result<(), String> {
     // Check for spaces (malformed)
     if trimmed.contains(' ') {
         return Err(format!(
-            "invalid model syntax: '{}' contains spaces. Use provider/model format or known alias",
-            trimmed
+            "invalid model syntax: '{trimmed}' contains spaces. Use provider/model format or known alias"
         ));
     }
     // Check provider/model format: provider_id/model_id
@@ -148,8 +147,7 @@ pub(crate) fn validate_model_syntax(model: &str) -> Result<(), String> {
     if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
         // #154: hint if the model looks like it belongs to a different provider
         let mut err_msg = format!(
-            "invalid model syntax: '{}'. Expected provider/model (e.g., anthropic/claude-opus-4-6) or known alias (opus, sonnet, haiku)",
-            trimmed
+            "invalid model syntax: '{trimmed}'. Expected provider/model (e.g., anthropic/claude-opus-4-6) or known alias (opus, sonnet, haiku)"
         );
         if trimmed.starts_with("gpt-") || trimmed.starts_with("gpt_") {
             err_msg.push_str("\nDid you mean `openai/");

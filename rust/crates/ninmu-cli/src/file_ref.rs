@@ -177,12 +177,12 @@ fn list_dir_entries(dir: &Path, prefix: &str, limit: usize) -> Vec<String> {
         let path = if prefix.is_empty() {
             file_name.clone()
         } else {
-            format!("{}/{}", prefix, file_name)
+            format!("{prefix}/{file_name}")
         };
 
         // Add trailing / for directories
-        if entry.file_type().map_or(false, |t| t.is_dir()) {
-            entries.push(format!("{}/", path));
+        if entry.file_type().is_ok_and(|t| t.is_dir()) {
+            entries.push(format!("{path}/"));
         } else {
             entries.push(path);
         }
@@ -222,12 +222,12 @@ fn list_dir_entries_matching(
         let path = if prefix.is_empty() {
             file_name.clone()
         } else {
-            format!("{}/{}", prefix, file_name)
+            format!("{prefix}/{file_name}")
         };
 
         // Add trailing / for directories
-        if entry.file_type().map_or(false, |t| t.is_dir()) {
-            entries.push(format!("{}/", path));
+        if entry.file_type().is_ok_and(|t| t.is_dir()) {
+            entries.push(format!("{path}/"));
         } else {
             entries.push(path);
         }
@@ -473,7 +473,7 @@ mod tests {
             let dir = std::env::temp_dir().join("ninmu-file-ref-test-limit");
             let _ = fs::create_dir_all(&dir);
             for i in 0..60 {
-                fs::write(dir.join(format!("file_{:03}.txt", i)), "").expect("write");
+                fs::write(dir.join(format!("file_{i:03}.txt")), "").expect("write");
             }
 
             let orig_cwd = env::current_dir();

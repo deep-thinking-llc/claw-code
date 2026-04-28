@@ -19,11 +19,11 @@ mod tui;
 // Re-exports from extracted format modules so existing code still compiles.
 // After Phase 0 is complete, this import brings all extracted items into scope
 // as if they were still defined in main.rs.
-use args::*;
-use format::*;
+use args::{CliAction, enforce_broad_cwd_policy, CliOutputFormat, parse_resume_args, parse_dump_manifests_args, parse_system_prompt_args, parse_export_args};
+use format::{classify_error_kind, split_error_hint, print_help_topic, validate_model_syntax, resolve_model_alias_with_config, parse_permission_mode_arg, default_permission_mode, looks_like_subcommand_typo, suggest_similar_subcommand, LocalHelpTopic, levenshtein_distance, load_session_reference, render_repl_help, format_compact_report, write_session_clear_backup, new_cli_session, status_context, format_status_report, StatusUsage, status_json_value, format_sandbox_report, sandbox_json_value, format_cost_report, parse_history_count, collect_session_prompt_history, render_prompt_history_report, list_managed_sessions, sessions_dir, format_session_modified_age, ModelProvenance, ModelSource, print_help_to};
 // Selective imports from app — avoid conflicting with format::* names
-use app::*;
-use cli_commands::*;
+use app::{RuntimeMcpState, build_runtime_plugin_state_with_loader, LiveCli, run_stale_base_preflight, run_repl};
+use cli_commands::{print_version, dump_manifests, print_bootstrap_plan, print_system_prompt, run_doctor, run_worker_state, run_init, render_config_report, render_config_json, render_diff_report, render_diff_json_for, render_memory_report, render_memory_json, render_diff_report_for, resolve_export_path, render_export_text, render_doctor_report, summarize_tool_payload_for_markdown};
 
 use std::collections::BTreeSet;
 use std::env;
@@ -446,9 +446,8 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                     .ok_or_else(|| "missing value for --mode".to_string())?;
                 if value == "rpc" {
                     return Ok(CliAction::Rpc);
-                } else {
-                    return Err(format!("unknown mode: {value} (supported: rpc)"));
                 }
+                return Err(format!("unknown mode: {value} (supported: rpc)"));
             }
             "--mode=rpc" => {
                 return Ok(CliAction::Rpc);
@@ -1075,7 +1074,7 @@ fn omc_compatibility_note_for_unknown_slash_command(name: &str) -> Option<&'stat
 }
 
 fn render_suggestion_line(label: &str, suggestions: &[String]) -> Option<String> {
-    (!suggestions.is_empty()).then(|| format!("  {label:<16} {}", suggestions.join(", "),))
+    (!suggestions.is_empty()).then(|| format!("  {label:<16} {}", suggestions.join(", ")))
 }
 
 fn suggest_slash_commands(input: &str) -> Vec<String> {
@@ -1945,8 +1944,7 @@ fn command_exists(name: &str) -> bool {
     Command::new("which")
         .arg(name)
         .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+        .is_ok_and(|output| output.status.success())
 }
 
 fn write_temp_text_file(
@@ -3363,7 +3361,7 @@ mod tests {
         // path (where they surface a misleading "missing Anthropic
         // credentials" error or burn API tokens on an empty prompt).
         let empty_err =
-            parse_args(&["".to_string()]).expect_err("empty positional arg should be rejected");
+            parse_args(&[String::new()]).expect_err("empty positional arg should be rejected");
         assert!(
             empty_err.starts_with("empty prompt:"),
             "empty-arg error should be specific, got: {empty_err}"
@@ -3374,7 +3372,7 @@ mod tests {
             whitespace_err.starts_with("empty prompt:"),
             "whitespace-only error should be specific, got: {whitespace_err}"
         );
-        let multi_empty_err = parse_args(&["".to_string(), "".to_string()])
+        let multi_empty_err = parse_args(&[String::new(), String::new()])
             .expect_err("multiple empty positional args should be rejected");
         assert!(
             multi_empty_err.starts_with("empty prompt:"),

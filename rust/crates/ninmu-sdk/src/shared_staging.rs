@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 /// A lock token granting exclusive write access to a staging file.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct StagingLock {
     pub task_id: String,
     pub agent_id: String,
@@ -22,7 +23,7 @@ pub struct StagingLockGuard<'a> {
     staging: &'a SharedStaging,
 }
 
-impl<'a> Drop for StagingLockGuard<'a> {
+impl Drop for StagingLockGuard<'_> {
     fn drop(&mut self) {
         if let Some(ref lock) = self.lock {
             self.staging.unlock(lock);
@@ -30,9 +31,10 @@ impl<'a> Drop for StagingLockGuard<'a> {
     }
 }
 
-impl<'a> StagingLockGuard<'a> {
+impl StagingLockGuard<'_> {
     /// Take ownership of the inner `StagingLock`, preventing auto-unlock on drop.
     /// Call this only if you intend to manage the lock lifecycle manually.
+    #[must_use] 
     pub fn into_inner(mut self) -> StagingLock {
         self.lock.take().expect("lock present")
     }
@@ -58,7 +60,7 @@ impl SharedStaging {
         Self {
             root,
             state: Arc::new(Mutex::new(StagingState::default())),
-            default_lock_timeout: Duration::from_secs(300),
+            default_lock_timeout: Duration::from_mins(5),
         }
     }
 
@@ -227,7 +229,7 @@ impl SharedStaging {
         task_id: &str,
         agent_id: &str,
         rel_path: &str,
-    ) -> Result<StagingLockGuard, String> {
+    ) -> Result<StagingLockGuard<'_>, String> {
         let lock = self.lock(task_id, agent_id, rel_path)?;
         Ok(StagingLockGuard {
             lock: Some(lock),
@@ -270,7 +272,7 @@ mod tests {
     fn staging() -> (SharedStaging, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("temp dir");
         let s = SharedStaging::new(dir.path().join("staging"))
-            .with_lock_timeout(Duration::from_secs(60));
+            .with_lock_timeout(Duration::from_mins(1));
         (s, dir)
     }
 

@@ -73,6 +73,7 @@ impl ConflictDetector {
     }
 
     /// Record a write and return the new version info.
+    #[must_use] 
     pub fn record_write(&self, agent_id: &str, path: &str, content: &str) -> u64 {
         let mut versions = self.versions.lock().expect("versions lock");
         let entry = versions.entry(path.to_string()).or_insert(FileVersion {

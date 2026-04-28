@@ -450,7 +450,7 @@ impl AgentOrchestrator {
     /// Number of queued tasks for an agent.
     #[must_use]
     pub fn queue_len(&self, agent_id: &str) -> usize {
-        self.queues.get(agent_id).map_or(0, |q| q.len())
+        self.queues.get(agent_id).map_or(0, std::collections::VecDeque::len)
     }
 
     /// Number of registered agents.

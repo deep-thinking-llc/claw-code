@@ -1,4 +1,4 @@
-//! Provider HTTP integration tests for Mistral, Gemini, Cohere, vLLM, and DashScope.
+//! Provider HTTP integration tests for Mistral, Gemini, Cohere, vLLM, and `DashScope`.
 //!
 //! These tests verify that each provider correctly:
 //! - Resolves configuration from environment variables
@@ -6,7 +6,7 @@
 //! - Handles authentication (required vs optional)
 //! - Strips routing prefixes from model names
 //! - Enforces provider-specific request size limits
-//! - Handles provider-specific request formatting (e.g., kimi is_error rejection)
+//! - Handles provider-specific request formatting (e.g., kimi `is_error` rejection)
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -293,7 +293,7 @@ async fn mistral_stream_message_emits_response() {
     }
 
     assert!(matches!(events[0], StreamEvent::MessageStart(_)));
-    assert!(events.len() > 0);
+    assert!(!events.is_empty());
 
     let captured = state.lock().await;
     let request = captured.first().expect("captured request");
@@ -382,8 +382,7 @@ async fn gemini_send_message_respects_context_window_limit() {
     let result = client.send_message(&large_request).await;
     assert!(
         matches!(result, Err(ApiError::ContextWindowExceeded { .. })),
-        "Should fail on Gemini context window limit, got {:?}",
-        result
+        "Should fail on Gemini context window limit, got {result:?}"
     );
 }
 
@@ -624,8 +623,7 @@ async fn dashscope_send_message_respects_6mb_size_limit() {
     let result = client.send_message(&large_request).await;
     assert!(
         matches!(result, Err(ApiError::RequestBodySizeExceeded { .. })),
-        "Should fail on DashScope 6MB size limit, got {:?}",
-        result
+        "Should fail on DashScope 6MB size limit, got {result:?}"
     );
 }
 

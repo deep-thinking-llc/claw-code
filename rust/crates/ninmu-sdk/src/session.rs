@@ -354,8 +354,7 @@ impl AgentSession {
         let next = MODEL_CYCLE
             .iter()
             .position(|&m| m == current)
-            .map(|i| MODEL_CYCLE[(i + 1) % MODEL_CYCLE.len()])
-            .unwrap_or(MODEL_CYCLE[0]);
+            .map_or(MODEL_CYCLE[0], |i| MODEL_CYCLE[(i + 1) % MODEL_CYCLE.len()]);
         self.set_model(next)?;
         Ok(next.to_string())
     }

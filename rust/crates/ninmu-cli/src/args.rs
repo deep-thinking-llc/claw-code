@@ -239,7 +239,7 @@ pub(crate) fn parse_args(args: &[String]) -> Result<CliAction, String> {
                 if provider_kind_from_str(val).is_none() {
                     return Err(format!("unknown provider '{val}'"));
                 }
-                provider = Some(val.to_string());
+                provider = Some(val.clone());
                 index += 2;
             }
             flag if flag.starts_with("--provider=") => {
@@ -290,9 +290,8 @@ pub(crate) fn parse_args(args: &[String]) -> Result<CliAction, String> {
                     .ok_or_else(|| "missing value for --mode".to_string())?;
                 if value == "rpc" {
                     return Ok(CliAction::Rpc);
-                } else {
-                    return Err(format!("unknown mode: {value} (supported: rpc)"));
                 }
+                return Err(format!("unknown mode: {value} (supported: rpc)"));
             }
             "--mode=rpc" => {
                 return Ok(CliAction::Rpc);

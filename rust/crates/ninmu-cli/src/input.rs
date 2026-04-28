@@ -21,7 +21,8 @@ pub enum ReadOutcome {
 }
 
 /// External data provider for argument completion.
-/// Set on the LineEditor at construction time.
+/// Set on the `LineEditor` at construction time.
+#[derive(Default)]
 pub struct CompletionProvider {
     /// Function that returns available model names for completion.
     pub model_names: Vec<String>,
@@ -29,14 +30,6 @@ pub struct CompletionProvider {
     pub session_ids: Vec<String>,
 }
 
-impl Default for CompletionProvider {
-    fn default() -> Self {
-        Self {
-            model_names: Vec::new(),
-            session_ids: Vec::new(),
-        }
-    }
-}
 
 struct SlashCommandHelper {
     completions: Vec<String>,
@@ -124,7 +117,7 @@ impl SlashCommandHelper {
             .collect()
     }
 
-    /// Detect argument command from the line and return a (completer_fn, arg_prefix) or None.
+    /// Detect argument command from the line and return a (`completer_fn`, `arg_prefix`) or None.
     fn try_argument_completion(&self, line: &str, pos: usize) -> Option<Vec<Pair>> {
         if pos != line.len() || !line.starts_with('/') {
             return None;
@@ -208,7 +201,7 @@ impl Completer for SlashCommandHelper {
         if let Some(arg_matches) = self.try_argument_completion(line, pos) {
             if !arg_matches.is_empty() {
                 // Determine the start position for replacement
-                let last_space = line[0..pos].rfind(' ').map(|i| i + 1).unwrap_or(0);
+                let last_space = line[0..pos].rfind(' ').map_or(0, |i| i + 1);
                 return Ok((last_space, arg_matches));
             }
         }
@@ -559,7 +552,7 @@ mod tests {
 
     #[test]
     fn detects_at_file_prefix_empty_path() {
-        assert_eq!(at_file_prefix("@", 1), Some("".to_string()));
+        assert_eq!(at_file_prefix("@", 1), Some(String::new()));
     }
 
     #[test]

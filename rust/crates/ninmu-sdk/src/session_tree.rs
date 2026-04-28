@@ -15,7 +15,7 @@ pub struct SessionTreeNode {
     pub role: String,
     /// A summary or label for this node.
     pub label: Option<String>,
-    /// IDs of child nodes (single source of truth lives in the SessionTree's BTreeMap).
+    /// IDs of child nodes (single source of truth lives in the `SessionTree`'s `BTreeMap`).
     pub children: Vec<String>,
 }
 
@@ -136,22 +136,19 @@ impl SessionTree {
         let label = node.label.clone();
 
         // Fork at root: create a new root sibling
-        match &parent_id {
-            Some(pid) => self.add_child(new_branch_id, pid, &role, label)?,
-            None => {
-                // Forking the root creates a second root-like node.
-                // We preserve the original root_id so the tree remains
-                // reachable. The new node gets its own entry.
-                let new_node = SessionTreeNode {
-                    id: new_branch_id.to_string(),
-                    parent_id: None,
-                    role: role.clone(),
-                    label,
-                    children: Vec::new(),
-                };
-                self.nodes.insert(new_branch_id.to_string(), new_node);
-                self.active_id = Some(new_branch_id.to_string());
-            }
+        if let Some(pid) = &parent_id { self.add_child(new_branch_id, pid, &role, label)? } else {
+            // Forking the root creates a second root-like node.
+            // We preserve the original root_id so the tree remains
+            // reachable. The new node gets its own entry.
+            let new_node = SessionTreeNode {
+                id: new_branch_id.to_string(),
+                parent_id: None,
+                role: role.clone(),
+                label,
+                children: Vec::new(),
+            };
+            self.nodes.insert(new_branch_id.to_string(), new_node);
+            self.active_id = Some(new_branch_id.to_string());
         }
         Ok(())
     }

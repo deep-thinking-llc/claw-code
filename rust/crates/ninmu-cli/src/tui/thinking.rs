@@ -40,7 +40,7 @@ impl ThinkingFrames {
 }
 
 /// Generate animated reasoning indicator frames (pulsing brain wave).
-/// Distinct from the generic ThinkingFrames dot-wave pattern.
+/// Distinct from the generic `ThinkingFrames` dot-wave pattern.
 pub struct ReasoningFrames;
 
 impl ReasoningFrames {

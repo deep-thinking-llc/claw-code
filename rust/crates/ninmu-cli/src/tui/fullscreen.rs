@@ -2,7 +2,7 @@
 //!
 //! Entered via the `--tui` flag. Provides a scrollable conversation history pane
 //! and a fixed input line at the bottom, all within the alternate screen buffer.
-//! The execute_turn closure handles dispatching input to the model and returns
+//! The `execute_turn` closure handles dispatching input to the model and returns
 //! rendered output text that gets appended to the scrollback.
 
 use std::io::{self, Write};
@@ -26,7 +26,7 @@ const HELP_OVERLAY: &str = "\
   PageUp / PageDown    Scroll conversation
   Home / End           Top / bottom
   Tab                  Expand/collapse tool output
-  Ctrl+C               Interrupt
+  Ctrl+C / Ctrl+D      Quit
   ?                    Toggle this help
   /exit                Exit TUI
 ───────────────────────────────────────────";
@@ -74,6 +74,12 @@ impl FullScreenTui {
             stdout.flush()?;
 
             let input = self.read_input(&mut stdout, conv_height as u16, conv_height as u16)?;
+
+            let Some(input) = input else {
+                // Ctrl+C or Ctrl+D — quit
+                self.running = false;
+                break;
+            };
 
             match input.as_str() {
                 "/exit" | "/quit" => {
@@ -160,26 +166,30 @@ impl FullScreenTui {
     /// Read a line of input from the user (crossterm event loop).
     /// Supports Ctrl+J (newline), Ctrl+D (exit), cursor left/right,
     /// backspace, and scroll keys.
+    /// Read a line of input from the user (crossterm event loop).
+    /// Returns `None` when the user requests to quit (Ctrl+C or Ctrl+D).
+    /// Returns `Some(input)` on normal submission, or `Some("")` for
+    /// scroll/navigation events that should not produce output.
     fn read_input(
         &mut self,
         stdout: &mut impl Write,
         prompt_row: u16,
         conv_height: u16,
-    ) -> io::Result<String> {
+    ) -> io::Result<Option<String>> {
         let mut buffer: Vec<char> = Vec::new();
         let mut cursor: usize = 0;
         loop {
             match crossterm::event::read() {
                 Ok(crossterm::event::Event::Key(key)) => match key.code {
-                    crossterm::event::KeyCode::Enter => {
-                        if !buffer.is_empty() {
-                            return Ok(buffer.iter().collect());
+                    crossterm::event::KeyCode::Enter
+                        if !buffer.is_empty() => {
+                            return Ok(Some(buffer.iter().collect()));
                         }
-                    }
                     crossterm::event::KeyCode::Char(c)
-                        if key.modifiers == crossterm::event::KeyModifiers::CONTROL && c == 'd' =>
+                        if key.modifiers == crossterm::event::KeyModifiers::CONTROL
+                            && (c == 'd' || c == 'c') =>
                     {
-                        return Ok(String::new());
+                        return Ok(None);
                     }
                     crossterm::event::KeyCode::Char(c)
                         if key.modifiers == crossterm::event::KeyModifiers::CONTROL && c == 'j' =>
@@ -193,31 +203,27 @@ impl FullScreenTui {
                         cursor += 1;
                         Self::render_input_line(stdout, prompt_row, &buffer, cursor)?;
                     }
-                    crossterm::event::KeyCode::Backspace => {
-                        if cursor > 0 {
+                    crossterm::event::KeyCode::Backspace
+                        if cursor > 0 => {
                             cursor -= 1;
                             buffer.remove(cursor);
                             Self::render_input_line(stdout, prompt_row, &buffer, cursor)?;
                         }
-                    }
-                    crossterm::event::KeyCode::Delete => {
-                        if cursor < buffer.len() {
+                    crossterm::event::KeyCode::Delete
+                        if cursor < buffer.len() => {
                             buffer.remove(cursor);
                             Self::render_input_line(stdout, prompt_row, &buffer, cursor)?;
                         }
-                    }
-                    crossterm::event::KeyCode::Left => {
-                        if cursor > 0 {
+                    crossterm::event::KeyCode::Left
+                        if cursor > 0 => {
                             cursor -= 1;
                             Self::render_input_line(stdout, prompt_row, &buffer, cursor)?;
                         }
-                    }
-                    crossterm::event::KeyCode::Right => {
-                        if cursor < buffer.len() {
+                    crossterm::event::KeyCode::Right
+                        if cursor < buffer.len() => {
                             cursor += 1;
                             Self::render_input_line(stdout, prompt_row, &buffer, cursor)?;
                         }
-                    }
                     crossterm::event::KeyCode::Home => {
                         cursor = 0;
                         Self::render_input_line(stdout, prompt_row, &buffer, cursor)?;
@@ -243,12 +249,12 @@ impl FullScreenTui {
                     crossterm::event::KeyCode::PageUp => {
                         let n = conv_height.saturating_sub(1) as usize;
                         self.scrollback.scroll_up(n);
-                        return Ok(String::new());
+                        return Ok(Some(String::new()));
                     }
                     crossterm::event::KeyCode::PageDown => {
                         let n = conv_height.saturating_sub(1) as usize;
                         self.scrollback.scroll_down(n);
-                        return Ok(String::new());
+                        return Ok(Some(String::new()));
                     }
                     crossterm::event::KeyCode::Esc => {}
                     _ => {}
@@ -312,7 +318,7 @@ mod tests {
     #[test]
     fn help_overlay_content() {
         assert!(HELP_OVERLAY.contains("PageUp"));
-        assert!(HELP_OVERLAY.contains("?"));
+        assert!(HELP_OVERLAY.contains('?'));
         assert!(HELP_OVERLAY.contains("/exit"));
     }
 
@@ -405,7 +411,7 @@ mod tests {
         assert!(output.contains("Keyboard"));
     }
 
-    /// Simulate a single read_input event and return what the buffer produces.
+    /// Simulate a single `read_input` event and return what the buffer produces.
     /// This is a simplified test that validates the dispatch logic only.
     fn simulate_key_event(tui: &mut FullScreenTui, key: crossterm::event::KeyCode) -> String {
         // We capture the buffer behavior by testing the scrollback directly
@@ -495,7 +501,7 @@ mod tests {
         let output = String::from_utf8_lossy(&buf);
         assert!(output.contains(PROMPT));
         // Newline in buffer should appear
-        assert!(output.contains("a\nb") || output.contains("a") || output.contains("b"));
+        assert!(output.contains("a\nb") || output.contains('a') || output.contains('b'));
     }
 
     #[test]
@@ -544,7 +550,7 @@ mod tests {
             Ok("response text".to_string())
         };
         // Manually simulate what run() does after reading input:
-        tui.scrollback.push(format!(" > hello"));
+        tui.scrollback.push(" > hello".to_string());
         let output = execute_turn("hello").expect("turn succeeded");
         tui.scrollback.push_str(&output);
         assert_eq!(call_count, 1);

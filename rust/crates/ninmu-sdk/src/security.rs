@@ -73,6 +73,7 @@ impl SecretScrubber {
     }
 
     /// Scrub secrets from a single string.
+    #[must_use] 
     pub fn scrub(&self, input: &str) -> (String, Vec<SecretMatch>) {
         let mut output = input.to_string();
         let mut matches = Vec::new();

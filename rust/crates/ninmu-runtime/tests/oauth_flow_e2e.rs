@@ -17,12 +17,13 @@ use serde_json::json;
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
+#[allow(clippy::cast_possible_truncation)]
 fn unique_id() -> u64 {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
-        .as_nanos() as u64;
-    COUNTER.fetch_add(1, Ordering::Relaxed) + nanos
+        .as_nanos();
+    COUNTER.fetch_add(1, Ordering::Relaxed) + nanos as u64
 }
 
 fn with_isolated_config<F, R>(f: F) -> R
@@ -166,14 +167,14 @@ fn credential_persistence_round_trip() {
         let token = OAuthTokenSet {
             access_token: "at-123".to_string(),
             refresh_token: Some("rt-456".to_string()),
-            expires_at: Some(9999999999),
+            expires_at: Some(9_999_999_999),
             scopes: vec!["openid".to_string()],
         };
         save_oauth_credentials(&token).unwrap();
         let loaded = load_oauth_credentials().unwrap().expect("should load");
         assert_eq!(loaded.access_token, "at-123");
         assert_eq!(loaded.refresh_token, Some("rt-456".to_string()));
-        assert_eq!(loaded.expires_at, Some(9999999999));
+        assert_eq!(loaded.expires_at, Some(9_999_999_999));
         assert_eq!(loaded.scopes, vec!["openid"]);
     });
 }

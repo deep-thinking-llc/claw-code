@@ -41,7 +41,9 @@ pub struct Policy {
 
 /// The domain of a policy.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum PolicyKind {
+    #[default]
     Execution,
     Branch,
     Test,
@@ -49,11 +51,6 @@ pub enum PolicyKind {
     Notification,
 }
 
-impl Default for PolicyKind {
-    fn default() -> Self {
-        Self::Execution
-    }
-}
 
 /// A condition expression evaluated against an action context.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -232,7 +229,7 @@ impl PolicyEngine {
             PolicyCondition::TestResult { min_pass_pct } => {
                 action
                     .test_pass_pct
-                    .map_or(false, |pct| pct < *min_pass_pct)
+                    .is_some_and(|pct| pct < *min_pass_pct)
             }
             PolicyCondition::DeploymentEnv(_env) => false,
             PolicyCondition::All(conditions) => {
@@ -355,7 +352,7 @@ mod tests {
         engine.add_policy(Policy {
             id: "override".into(),
             name: "Override".into(),
-            description: "".into(),
+            description: String::new(),
             kind: PolicyKind::Execution,
             condition: PolicyCondition::PermissionMode("read_only".into()),
             action: PolicyDecision::Deny {
@@ -376,7 +373,7 @@ mod tests {
         engine.add_policy(Policy {
             id: "disabled".into(),
             name: "Disabled".into(),
-            description: "".into(),
+            description: String::new(),
             kind: PolicyKind::Execution,
             condition: PolicyCondition::PermissionMode("read_only".into()),
             action: PolicyDecision::Deny {

@@ -4,7 +4,7 @@ use std::sync::{Mutex, OnceLock};
 
 use ninmu_api::models_file;
 
-/// Global mutex to serialize e2e tests that manipulate the global models_file registry.
+/// Global mutex to serialize e2e tests that manipulate the global `models_file` registry.
 fn e2e_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
@@ -137,7 +137,7 @@ fn e2e_invalid_models_file_returns_error() {
     fs::create_dir_all(&dir).expect("create temp dir");
     let path = write_models_file(&dir, "this is not valid json");
     let result = models_file::load_custom_models(&path);
-    assert!(result.is_err(), "invalid JSON should error: {:?}", result);
+    assert!(result.is_err(), "invalid JSON should error: {result:?}");
     assert!(result.unwrap_err().contains("parse error"));
     fs::remove_dir_all(&dir).expect("cleanup");
 }

@@ -48,7 +48,7 @@ pub fn collapse_tool_output(
         lines
             .iter()
             .take(config.visible_lines)
-            .cloned()
+            .copied()
             .collect::<Vec<_>>()
             .join("\n")
     } else {
@@ -67,15 +67,14 @@ pub fn collapse_tool_output(
     let icon = if is_error { "fail" } else { "ok" };
     let summary = if was_truncated {
         format!(
-            "{} {} ({} lines) — full output in session · [scroll up or /debugToolCall to inspect]",
-            icon, tool_name, total_lines
+            "{icon} {tool_name} ({total_lines} lines) — full output in session · [scroll up or /debugToolCall to inspect]"
         )
     } else {
-        format!("{} {}", icon, tool_name)
+        format!("{icon} {tool_name}")
     };
 
     if was_truncated {
-        write!(&mut visible, "\n{}", DISPLAY_TRUNCATION_NOTICE).expect("write to string");
+        write!(&mut visible, "\n{DISPLAY_TRUNCATION_NOTICE}").expect("write to string");
     }
 
     CollapsedToolOutput {

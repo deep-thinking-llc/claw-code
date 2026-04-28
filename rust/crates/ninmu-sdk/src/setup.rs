@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 /// A detected provider credential available on the system.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DetectedProvider {
-    /// Provider name (e.g. "Anthropic", "OpenAI").
+    /// Provider name (e.g. "Anthropic", "`OpenAI`").
     pub name: String,
     /// Whether the required API key is present in the environment.
     pub key_present: bool,
@@ -27,8 +27,9 @@ pub struct DetectedProvider {
 
 impl DetectedProvider {
     /// Check if a provider API key is set.
+    #[must_use] 
     pub fn check(name: &'static str, env_var: &'static str, key_url: &'static str) -> Self {
-        let present = std::env::var(env_var).ok().map_or(false, |v| !v.is_empty());
+        let present = std::env::var(env_var).ok().is_some_and(|v| !v.is_empty());
         Self {
             name: name.to_string(),
             key_present: present,
@@ -191,9 +192,7 @@ impl SetupReport {
         let tool_count = tools.iter().filter(|t| t.installed).count();
 
         Self {
-            cwd: std::env::current_dir()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|_| "<unknown>".to_string()),
+            cwd: std::env::current_dir().map_or_else(|_| "<unknown>".to_string(), |p| p.display().to_string()),
             providers,
             tools,
             has_provider,
@@ -233,7 +232,9 @@ impl SetupReport {
 
         lines.push(String::new());
 
-        if !self.has_provider {
+        if self.has_provider {
+            lines.push("  API provider detected. You're ready to start.".to_string());
+        } else {
             lines.push("  No API providers configured.".to_string());
             lines.push("  Set one of these environment variables:".to_string());
             for p in &self.providers {
@@ -241,8 +242,6 @@ impl SetupReport {
                     lines.push(format!("    {}  <- {}", p.env_var, p.key_url));
                 }
             }
-        } else {
-            lines.push("  API provider detected. You're ready to start.".to_string());
         }
 
         lines.join("\n")
@@ -526,7 +525,7 @@ mod tests {
         let report = SetupReport {
             providers: vec![],
             tools: vec![],
-            cwd: "".to_string(),
+            cwd: String::new(),
             has_provider: false,
             tool_count: 0,
         };
@@ -539,7 +538,7 @@ mod tests {
         let report = SetupReport {
             providers: vec![],
             tools: vec![],
-            cwd: "".to_string(),
+            cwd: String::new(),
             has_provider: true,
             tool_count: 0,
         };

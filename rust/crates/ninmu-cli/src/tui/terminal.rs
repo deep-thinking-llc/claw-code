@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 /// Tracks terminal dimensions with periodic re-query.
 ///
-/// This avoids calling crossterm::terminal::size() on every render
+/// This avoids calling `crossterm::terminal::size()` on every render
 /// while still catching SIGWINCH resizes within the polling interval.
 pub struct TerminalSize {
     cached_width: AtomicU16,
@@ -13,7 +13,7 @@ pub struct TerminalSize {
 }
 
 impl TerminalSize {
-    /// Create a new TerminalSize with the default polling interval (1s).
+    /// Create a new `TerminalSize` with the default polling interval (1s).
     pub fn new() -> Self {
         let (w, h) = Self::query_size().unwrap_or((80, 24));
         Self {
@@ -41,7 +41,7 @@ impl TerminalSize {
     pub fn invalidate(&self) {
         if let Ok(mut last) = self.last_checked.lock() {
             *last = Instant::now()
-                .checked_sub(Duration::from_secs(3600))
+                .checked_sub(Duration::from_hours(1))
                 .unwrap_or(Instant::now());
         }
     }
@@ -50,8 +50,7 @@ impl TerminalSize {
         let should_refresh = self
             .last_checked
             .lock()
-            .map(|last| last.elapsed() >= self.poll_interval)
-            .unwrap_or(false);
+            .is_ok_and(|last| last.elapsed() >= self.poll_interval);
         if should_refresh {
             if let Ok((w, h)) = Self::query_size() {
                 self.cached_width.store(w, Ordering::Relaxed);

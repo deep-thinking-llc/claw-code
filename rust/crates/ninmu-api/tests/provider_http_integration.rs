@@ -1,4 +1,4 @@
-//! Provider HTTP integration tests for OpenAI, Ollama, and Qwen.
+//! Provider HTTP integration tests for `OpenAI`, Ollama, and Qwen.
 //!
 //! These tests verify that each provider correctly:
 //! - Resolves configuration from environment variables
@@ -327,7 +327,7 @@ async fn openai_stream_message_requests_usage_inclusion() {
     }
 
     assert!(matches!(events[0], StreamEvent::MessageStart(_)));
-    assert!(events.len() > 0);
+    assert!(!events.is_empty());
 
     let captured = state.lock().await;
     let request = captured.first().expect("captured request");
@@ -472,8 +472,7 @@ async fn ollama_send_message_works_without_api_key() {
     let auth_header = request.headers.get("authorization").map(String::as_str);
     assert!(
         auth_header == Some("Bearer") || auth_header == Some("Bearer ") || auth_header.is_none(),
-        "Ollama should send empty bearer or no auth header without key, got {:?}",
-        auth_header
+        "Ollama should send empty bearer or no auth header without key, got {auth_header:?}"
     );
 }
 

@@ -18,7 +18,7 @@ use ninmu_api::{
     StreamEvent as ApiStreamEvent, ToolChoice, ToolDefinition, ToolResultContentBlock,
 };
 
-use crate::cli_commands::*;
+use crate::cli_commands::{run_init, render_doctor_report, render_config_report, render_memory_report, run_mcp_serve, render_diff_report, resolve_export_path, render_export_text, format_bughunter_report, format_ultraplan_report, render_teleport_report, validate_no_args, render_last_tool_debug_report, git_output, format_pr_report, format_issue_report};
 use crate::init::initialize_repo;
 use crate::input;
 use crate::render::{MarkdownStreamState, Spinner, TerminalRenderer};
@@ -46,8 +46,8 @@ use ninmu_tools::{
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
-use crate::args::*;
-use crate::format::*;
+use crate::args::{CliOutputFormat, enforce_broad_cwd_policy, try_resolve_bare_skill_prompt};
+use crate::format::{SessionHandle, PromptHistoryEntry, new_cli_session, create_managed_session_handle, status_context, slash_command_completion_candidates_with_sessions, list_managed_sessions, format_auto_compaction_notice, render_repl_help, format_cost_report, format_unknown_slash_command, format_status_report, StatusUsage, parse_history_count, collect_session_prompt_history, render_prompt_history_report, format_sandbox_report, format_model_report, resolve_model_alias_with_config, format_model_switch_report, format_permissions_report, normalize_permission_mode, permission_mode_from_label, format_permissions_switch_report, render_resume_usage, load_session_reference, format_resume_report, render_session_list, resolve_session_reference, confirm_session_deletion, delete_managed_session, format_compact_report, parse_git_workspace_summary, parse_git_status_branch, format_commit_skipped_report, format_commit_preflight_report, resolve_git_branch_for, max_tokens_for_model, filter_tool_specs, format_user_visible_api_error, format_tool_call_start, format_tool_result, resolve_repl_model, format_connected_line, truncate_for_summary, first_visible_line, extract_tool_path, summarize_tool_payload};
 use crate::tui::permission::{
     format_enhanced_permission_prompt, parse_permission_response, PermissionDecision,
 };
@@ -1989,8 +1989,8 @@ impl ninmu_runtime::PermissionPrompter for CliPermissionPrompter {
         let prompt = format_enhanced_permission_prompt(
             &request.tool_name,
             &input,
-            &self.current_mode.as_str(),
-            &request.required_mode.as_str(),
+            self.current_mode.as_str(),
+            request.required_mode.as_str(),
             request.reason.as_deref(),
         );
         println!("{prompt}");
@@ -2309,17 +2309,15 @@ impl AnthropicRuntimeClient {
                 }
                 ApiStreamEvent::MessageDelta(delta) => {
                     let usage = delta.usage.token_usage();
-                    cumulative_input_tokens += usage.input_tokens as u64;
-                    cumulative_output_tokens += usage.output_tokens as u64;
+                    cumulative_input_tokens += u64::from(usage.input_tokens);
+                    cumulative_output_tokens += u64::from(usage.output_tokens);
                     events.push(AssistantEvent::Usage(usage));
 
                     // Update status bar
-                    let cost_str = pricing_for_model(&self.model)
-                        .map(|p| {
+                    let cost_str = pricing_for_model(&self.model).map_or_else(|| "$—".to_string(), |p| {
                             let estimate = usage.estimate_cost_usd_with_pricing(p);
                             format!("${:.4}", estimate.total_cost_usd())
-                        })
-                        .unwrap_or_else(|| "$—".to_string());
+                        });
                     let status_state = StatusBarState {
                         model: self.model.clone(),
                         permission_mode: "active".to_string(),

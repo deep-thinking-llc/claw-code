@@ -158,7 +158,7 @@ impl NotificationSink for ConsoleSink {
         Ok(())
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "console"
     }
 }
@@ -183,7 +183,7 @@ impl NotificationSink for FileSink {
         Ok(())
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "file"
     }
 }
@@ -248,7 +248,7 @@ impl NotificationSink for WebhookSink {
             .map_err(|e| format!("curl failed to start: {e}"))?;
         if let Some(mut stdin) = child.stdin.take() {
             std::io::Write::write_all(&mut stdin, payload.as_bytes())
-                .and_then(|_| stdin.flush())
+                .and_then(|()| stdin.flush())
                 .map_err(|e| format!("failed to write payload: {e}"))?;
         }
         let output = child
@@ -261,7 +261,7 @@ impl NotificationSink for WebhookSink {
         Ok(())
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "webhook"
     }
 }
@@ -295,7 +295,7 @@ impl NotificationSink for EmailSink {
         ))
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "email"
     }
 }
@@ -402,7 +402,8 @@ impl NotificationDispatcher {
     }
 
     /// Dispatch a notification to all matching sinks.
-    /// Returns a vector of (sink_name, result) for diagnostics.
+    /// Returns a vector of (`sink_name`, result) for diagnostics.
+    #[must_use] 
     pub fn dispatch(&self, notification: &Notification) -> Vec<(&str, Result<(), String>)> {
         self.sinks
             .iter()

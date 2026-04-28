@@ -18,11 +18,11 @@ use super::preflight_message_request;
 
 /// Default base URL for xAI (Grok) API.
 pub const DEFAULT_XAI_BASE_URL: &str = "https://api.x.ai/v1";
-/// Default base URL for OpenAI API.
+/// Default base URL for `OpenAI` API.
 pub const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
-/// Default base URL for Alibaba DashScope compatible-mode endpoint.
+/// Default base URL for Alibaba `DashScope` compatible-mode endpoint.
 pub const DEFAULT_DASHSCOPE_BASE_URL: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1";
-/// Default base URL for DeepSeek API.
+/// Default base URL for `DeepSeek` API.
 pub const DEFAULT_DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com/v1";
 /// Default base URL for local Ollama. Set `OLLAMA_BASE_URL` to override
 /// (e.g. `https://api.ollama.com/v1` for Ollama Cloud).
@@ -175,7 +175,7 @@ impl OpenAiCompatConfig {
     /// `Qwen` models served outside Alibaba `DashScope` (local, third-party API, etc.).
     /// Configure `QWEN_API_KEY` and/or `QWEN_BASE_URL`. Falls back to
     /// `OPENAI_API_KEY` and `OPENAI_BASE_URL` if the Qwen-specific vars
-    /// are not set (e.g. OpenRouter).
+    /// are not set (e.g. `OpenRouter`).
     #[must_use]
     pub const fn qwen() -> Self {
         Self {
@@ -271,8 +271,8 @@ impl OpenAiCompatConfig {
 
 /// OpenAI-compatible HTTP client for chat completions.
 ///
-/// Used by all OpenAI-compat providers (OpenAI, xAI, DeepSeek,
-/// DashScope, Ollama, Qwen external, vLLM). Supports both streaming
+/// Used by all OpenAI-compat providers (`OpenAI`, xAI, `DeepSeek`,
+/// `DashScope`, Ollama, Qwen external, vLLM). Supports both streaming
 /// and non-streaming requests with configurable retry/backoff.
 #[derive(Debug, Clone)]
 pub struct OpenAiCompatClient {
@@ -525,8 +525,7 @@ fn jitter_for_base(base: Duration) -> Duration {
     }
     let raw_nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|elapsed| u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX))
-        .unwrap_or(0);
+        .map_or(0, |elapsed| u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX));
     let tick = JITTER_COUNTER.fetch_add(1, Ordering::Relaxed);
     let mut mixed = raw_nanos
         .wrapping_add(tick)

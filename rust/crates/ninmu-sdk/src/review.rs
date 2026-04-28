@@ -305,7 +305,7 @@ impl Default for RiskClassifier {
 pub struct ReviewManager {
     /// Pending changes awaiting review.
     pending: BTreeMap<String, ChangeRecord>,
-    /// Review decisions (change_id -> decision).
+    /// Review decisions (`change_id` -> decision).
     decisions: BTreeMap<String, ReviewDecision>,
     /// Active review gates.
     gates: Vec<ReviewGate>,

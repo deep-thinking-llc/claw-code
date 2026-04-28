@@ -197,7 +197,7 @@ impl SessionTreeLog {
                 TreeEntry::ThinkingLevel { node_id: nid, .. } => path_ids.contains(nid),
                 TreeEntry::Branch { from_node_id, .. } => path_ids.contains(from_node_id),
                 TreeEntry::Custom { node_id: nid, .. } => {
-                    nid.as_ref().map_or(false, |id| path_ids.contains(id))
+                    nid.as_ref().is_some_and(|id| path_ids.contains(id))
                 }
             })
             .cloned()
@@ -753,7 +753,7 @@ mod tests {
         let path = dir.join("corrupted_mid.jsonl");
 
         let valid = r#"{"type":"message","node_id":"r1","parent_id":null,"role":"user","content":"hi","label":null}"#;
-        let bad = r#"{not valid json}"#;
+        let bad = r"{not valid json}";
         let valid2 = r#"{"type":"message","node_id":"c1","parent_id":"r1","role":"assistant","content":"yo","label":null}"#;
         {
             let mut f = fs::File::create(&path).expect("create");
