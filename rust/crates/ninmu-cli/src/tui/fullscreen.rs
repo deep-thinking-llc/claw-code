@@ -6,6 +6,9 @@
 //! rendered output text that gets appended to the scrollback.
 
 use std::io::{self, Write};
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 
 use crossterm::cursor::MoveTo;
 use crossterm::style::Print;
@@ -20,6 +23,8 @@ use crate::tui::theme::Theme;
 
 const INPUT_HEIGHT: u16 = 3;
 const PROMPT: &str = "> ";
+const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const SPINNER_INTERVAL: Duration = Duration::from_millis(80);
 
 const HELP_OVERLAY: &str = "\
 ── Keyboard Shortcuts ─────────────────────
@@ -92,7 +97,51 @@ impl FullScreenTui {
                 _ if input.is_empty() => {}
                 _ => {
                     self.scrollback.push(format!(" > {input}"));
-                    match execute_turn(&input) {
+                    self.scrollback.push(String::new()); // placeholder for spinner line
+
+                    // Animate a spinner while the turn executes.
+                    // thread::scope lets us borrow execute_turn from the main
+                    // thread while a scoped animation thread renders frames.
+                    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    let result = thread::scope(|s| {
+                        let done_clone = done.clone();
+                        let anim = s.spawn(move || {
+                            let mut frame = 0usize;
+                            loop {
+                                if done_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                                    break;
+                                }
+                                let spinner = SPINNER_FRAMES[frame % SPINNER_FRAMES.len()];
+                                let _ = crossterm::execute!(
+                                    io::stdout(),
+                                    crossterm::cursor::SavePosition,
+                                    crossterm::cursor::MoveTo(0, conv_height as u16 + INPUT_HEIGHT),
+                                    crossterm::terminal::Clear(crossterm::terminal::ClearType::CurrentLine),
+                                    crossterm::style::Print(format!("  {spinner} thinking...")),
+                                    crossterm::cursor::RestorePosition,
+                                );
+                                frame = frame.wrapping_add(1);
+                                thread::sleep(SPINNER_INTERVAL);
+                            }
+                        });
+
+                        let result = execute_turn(&input);
+                        done.store(true, std::sync::atomic::Ordering::Relaxed);
+                        let _ = anim.join();
+                        result
+                    });
+
+                    // Clear the spinner line
+                    let _ = crossterm::execute!(
+                        io::stdout(),
+                        crossterm::cursor::MoveTo(0, conv_height as u16 + INPUT_HEIGHT),
+                        crossterm::terminal::Clear(crossterm::terminal::ClearType::CurrentLine),
+                    );
+
+                    // Remove the placeholder spinner line from scrollback
+                    self.scrollback.pop();
+
+                    match result {
                         Ok(output) => {
                             if !output.is_empty() {
                                 self.scrollback.push_str(&output);

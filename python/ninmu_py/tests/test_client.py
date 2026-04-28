@@ -149,6 +149,22 @@ class TestErrors:
         with pytest.raises(NinmuBinaryError, match="binary not found"):
             NinmuClient(binary="nonexistent-binary")
 
+    def test_binary_path_traversal_rejected(self) -> None:
+        with pytest.raises(NinmuBinaryError, match="traversal"):
+            NinmuClient(binary="../../malicious")
+
+    def test_binary_relative_not_on_path_rejected(self, monkeypatch: Any) -> None:
+        import shutil
+        monkeypatch.setattr(shutil, "which", lambda *a, **kw: None)
+        with pytest.raises(NinmuBinaryError, match="not found on PATH"):
+            NinmuClient(binary="some_bin")
+
+    def test_binary_absolute_missing_rejected(self, monkeypatch: Any) -> None:
+        import os
+        monkeypatch.setattr(os.path, "isfile", lambda *a, **kw: False)
+        with pytest.raises(NinmuBinaryError, match="does not exist"):
+            NinmuClient(binary="/nonexistent/ninmu")
+
 
 class TestContextManager:
     def test_context_manager_calls_shutdown(self, mock_process: Any) -> None:

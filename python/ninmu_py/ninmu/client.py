@@ -59,20 +59,22 @@ class NinmuClient:
         self._lock = threading.Lock()
         self._closed = False
 
+        resolved = self._resolve_binary(binary)
+
         try:
             self._proc = subprocess.Popen(
-                [binary, "rpc"],
+                [resolved, "rpc"],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
         except FileNotFoundError as exc:
             raise NinmuBinaryError(
-                f"binary not found: {binary!r}. Is ninmu installed and on PATH?"
+                f"binary not found: {resolved!r}. Is ninmu installed and on PATH?"
             ) from exc
         except OSError as exc:
             raise NinmuBinaryError(
-                f"binary could not be executed: {binary!r}: {exc}"
+                f"binary could not be executed: {resolved!r}: {exc}"
             ) from exc
 
         self._stdin: TextIO | None = self._proc.stdin  # type: ignore[assignment]
@@ -82,6 +84,31 @@ class NinmuClient:
             target=_drain_stderr, args=(self._proc.stderr,), daemon=True
         )
         self._stderr_thread.start()
+
+    @staticmethod
+    def _resolve_binary(binary: str) -> str:
+        """Resolve and validate the binary path."""
+        import os
+        import shutil
+
+        if ".." in binary:
+            raise NinmuBinaryError(
+                f"binary path contains '..' traversal: {binary!r}"
+            )
+
+        if os.path.isabs(binary):
+            if not os.path.isfile(binary):
+                raise NinmuBinaryError(
+                    f"absolute binary path does not exist: {binary!r}"
+                )
+            return binary
+
+        resolved = shutil.which(binary)
+        if resolved is None:
+            raise NinmuBinaryError(
+                f"binary not found on PATH: {binary!r}"
+            )
+        return resolved
 
     # ------------------------------------------------------------------
     # Context manager

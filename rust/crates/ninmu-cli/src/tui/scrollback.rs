@@ -38,6 +38,11 @@ impl Scrollback {
         self.lines.push(line);
     }
 
+    /// Remove and return the last line, if any.
+    pub fn pop(&mut self) -> Option<String> {
+        self.lines.pop()
+    }
+
     /// Push multiple lines at once (typically from a multi-line string).
     pub fn push_str(&mut self, text: &str) {
         for line in text.lines() {

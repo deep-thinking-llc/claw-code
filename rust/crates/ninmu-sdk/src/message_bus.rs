@@ -10,6 +10,14 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::security::SecretScrubber;
+
+/// Token that authenticates a publisher on the message bus.
+#[derive(Debug, Clone)]
+pub struct PublisherToken {
+    pub agent_id: String,
+}
+
 /// A strongly-typed message that agents can send to each other.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentMessage {
@@ -33,6 +41,7 @@ pub struct MessageBus {
     channels: Arc<Mutex<HashMap<String, tokio::sync::broadcast::Sender<AgentMessage>>>>,
     history: Arc<Mutex<VecDeque<AgentMessage>>>,
     max_history: usize,
+    scrubber: Option<SecretScrubber>,
 }
 
 impl MessageBus {
@@ -43,15 +52,37 @@ impl MessageBus {
             channels: Arc::new(Mutex::new(HashMap::new())),
             history: Arc::new(Mutex::new(VecDeque::with_capacity(max_history))),
             max_history,
+            scrubber: None,
         }
+    }
+
+    /// Enable secret scrubbing on message payloads before storing history.
+    #[must_use]
+    pub fn with_scrubber(mut self, scrubber: SecretScrubber) -> Self {
+        self.scrubber = Some(scrubber);
+        self
     }
 
     /// Publish a message to all subscribers of a topic.
     ///
-    /// The message is recorded in the history ring-buffer and sent to all
-    /// active receivers on the topic's broadcast channel.
-    pub fn publish(&self, topic: &str, mut message: AgentMessage) {
+    /// The `token` MUST belong to the same agent as `message.from_agent`.
+    pub fn publish(&self,
+        token: &PublisherToken,
+        topic: &str,
+        mut message: AgentMessage,
+    ) {
+        if message.from_agent != token.agent_id {
+            return; // silently drop impersonation attempts
+        }
         message.channel = topic.to_string();
+
+        // Scrub secrets from payload before storing history
+        if let Some(scrubber) = &self.scrubber {
+            if let Some(payload_str) = message.payload.as_str() {
+                let (scrubbed, _) = scrubber.scrub(payload_str);
+                message.payload = Value::String(scrubbed);
+            }
+        }
 
         // Record in history
         {
@@ -133,7 +164,14 @@ impl MessageBus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
+    fn alice_token() -> PublisherToken {
+        PublisherToken { agent_id: "alice".to_string() }
+    }
+
+    fn bob_token() -> PublisherToken {
+        PublisherToken { agent_id: "bob".to_string() }
+    }
 
     fn test_message(from: &str, topic: &str) -> AgentMessage {
         AgentMessage {
@@ -150,7 +188,8 @@ mod tests {
     async fn publish_subscribe_roundtrip() {
         let bus = MessageBus::new(100);
         let mut rx = bus.subscribe("test.topic");
-        bus.publish("test.topic", test_message("alice", "test.topic"));
+        let token = alice_token();
+        bus.publish(&token, "test.topic", test_message("alice", "test.topic"));
         let msg = rx.recv().await.expect("should receive message");
         assert_eq!(msg.from_agent, "alice");
     }
@@ -160,7 +199,8 @@ mod tests {
         let bus = MessageBus::new(100);
         let mut rx1 = bus.subscribe("test.topic");
         let mut rx2 = bus.subscribe("test.topic");
-        bus.publish("test.topic", test_message("alice", "test.topic"));
+        let token = alice_token();
+        bus.publish(&token, "test.topic", test_message("alice", "test.topic"));
         let msg1 = rx1.recv().await.expect("rx1 should receive");
         let msg2 = rx2.recv().await.expect("rx2 should receive");
         assert_eq!(msg1.from_agent, "alice");
@@ -172,10 +212,10 @@ mod tests {
         let bus = MessageBus::new(100);
         let mut rx_a = bus.subscribe("topic.a");
         let mut rx_b = bus.subscribe("topic.b");
-        bus.publish("topic.a", test_message("alice", "topic.a"));
+        let token = alice_token();
+        bus.publish(&token, "topic.a", test_message("alice", "topic.a"));
         let msg_a = rx_a.recv().await.expect("topic.a should receive");
         assert_eq!(msg_a.from_agent, "alice");
-        // rx_b should NOT receive this message; use select with timeout
         let result = tokio::time::timeout(
             std::time::Duration::from_millis(50),
             rx_b.recv(),
@@ -188,7 +228,8 @@ mod tests {
     async fn broadcast_message() {
         let bus = MessageBus::new(100);
         let mut rx = bus.subscribe_all();
-        bus.publish("some.topic", test_message("alice", "some.topic"));
+        let token = alice_token();
+        bus.publish(&token, "some.topic", test_message("alice", "some.topic"));
         let msg = rx.recv().await.expect("should receive broadcast");
         assert_eq!(msg.from_agent, "alice");
     }
@@ -199,7 +240,8 @@ mod tests {
         let mut rx = bus.subscribe("tasks");
         let mut msg = test_message("alice", "tasks");
         msg.correlation_id = Some("task-42".into());
-        bus.publish("tasks", msg);
+        let token = alice_token();
+        bus.publish(&token, "tasks", msg);
         let received = rx.recv().await.expect("should receive");
         assert_eq!(received.correlation_id.as_deref(), Some("task-42"));
     }
@@ -207,15 +249,16 @@ mod tests {
     #[tokio::test]
     async fn history_retention() {
         let bus = MessageBus::new(3);
+        let token = alice_token();
         for i in 0..5 {
-            let mut msg = test_message(&format!("agent-{i}"), "topic");
+            let mut msg = test_message("alice", "topic");
             msg.payload = serde_json::json!({"i": i});
-            bus.publish("topic", msg);
+            bus.publish(&token, "topic", msg);
         }
         let history = bus.history("topic");
         assert_eq!(history.len(), 3);
-        assert_eq!(history[0].from_agent, "agent-2");
-        assert_eq!(history[2].from_agent, "agent-4");
+        assert_eq!(history[0].payload["i"], 2);
+        assert_eq!(history[2].payload["i"], 4);
     }
 
     #[test]
@@ -223,9 +266,36 @@ mod tests {
         let bus = MessageBus::new(100);
         let rx = bus.subscribe("test");
         drop(rx);
-        // After dropping the receiver, publishing should not panic
-        bus.publish("test", test_message("alice", "test"));
-        // Channel still exists but has no active receivers
+        let token = alice_token();
+        bus.publish(&token, "test", test_message("alice", "test"));
         assert!(bus.topic_count() > 0);
+    }
+
+    #[test]
+    fn wrong_agent_id_rejected() {
+        let bus = MessageBus::new(100);
+        let token = alice_token();   // alice token
+        let mut msg = test_message("bob", "test"); // but message says from bob
+        msg.payload = serde_json::json!("payload");
+        bus.publish(&token, "test", msg);
+        // No subscriber, but history should be empty because message was dropped
+        let history = bus.history("test");
+        assert!(history.is_empty(), "impersonation should be dropped");
+    }
+
+    #[test]
+    fn history_scrubs_secrets() {
+        let scrubber = SecretScrubber::default();
+        let bus = MessageBus::new(10).with_scrubber(scrubber);
+        let token = alice_token();
+        let mut msg = test_message("alice", "test");
+        msg.payload = serde_json::json!("key=sk-ant-api03-secret1234567890abcdef");
+        bus.publish(&token, "test", msg);
+        let history = bus.history("test");
+        assert_eq!(history.len(), 1);
+        assert!(
+            history[0].payload.as_str().unwrap().contains("[REDACTED]"),
+            "secret should be scrubbed in history"
+        );
     }
 }

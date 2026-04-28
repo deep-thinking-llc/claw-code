@@ -68,7 +68,7 @@ pub enum PolicyCondition {
 }
 
 /// Context about the action being evaluated.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PolicyAction {
     pub kind: PolicyKind,
     pub tool_name: Option<String>,
@@ -79,6 +79,22 @@ pub struct PolicyAction {
     pub deployment_env: Option<String>,
     pub agent_id: String,
     pub task_id: String,
+}
+
+impl Default for PolicyAction {
+    fn default() -> Self {
+        Self {
+            kind: PolicyKind::Execution,
+            tool_name: None,
+            file_paths: Vec::new(),
+            permission_mode: None,
+            branch_name: None,
+            test_pass_pct: None,
+            deployment_env: None,
+            agent_id: String::new(),
+            task_id: String::new(),
+        }
+    }
 }
 
 /// A registry of all policies.

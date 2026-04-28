@@ -66,7 +66,7 @@ pub use event_bus::{
     TurnEvent,
 };
 pub use extension::{Extension, ExtensionRegistry, SimpleExtension};
-pub use message_bus::{AgentMessage, MessageBus};
+pub use message_bus::{AgentMessage, MessageBus, PublisherToken};
 pub use notification::{
     ConsoleSink, EmailSink, EventType, FileSink, Notification, NotificationDispatcher,
     NotificationFilter, NotificationSink, Severity, SinkRegistration, WebhookSink,
