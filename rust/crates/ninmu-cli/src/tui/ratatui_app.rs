@@ -1199,4 +1199,76 @@ mod tests {
             "expected at least 5 spans, got: {spans:?}"
         );
     }
+
+    // -- Splash screen tests ---------------------------------------------------
+
+    #[test]
+    fn splash_start_initialized_on_new() {
+        let app = RatatuiApp::new(
+            "test-model".into(),
+            "workspace-write".into(),
+            Some("main".into()),
+        );
+        assert!(app.splash_start.is_some());
+    }
+
+    #[test]
+    fn lerp_midpoint() {
+        assert_eq!(lerp(0, 100, 0.5), 50);
+    }
+
+    #[test]
+    fn lerp_at_bounds() {
+        assert_eq!(lerp(10, 20, 0.0), 10);
+        assert_eq!(lerp(10, 20, 1.0), 20);
+    }
+
+    #[test]
+    fn lerp_extrapolates_beyond_one() {
+        // lerp doesn't clamp — it extrapolates
+        assert_eq!(lerp(0, 100, 1.5), 150);
+    }
+
+    #[test]
+    fn splash_draw_no_start_returns_false() {
+        let mut app = RatatuiApp::new("m".into(), "r".into(), None);
+        app.splash_start = None;
+        let backend = ratatui::backend::TestBackend::new(80, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let result = terminal.draw(|frame| {
+            let area = frame.area();
+            assert!(!app.draw_splash(frame, area));
+        });
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn splash_draw_expired_clears_and_returns_false() {
+        let mut app = RatatuiApp::new("m".into(), "r".into(), None);
+        // Set start to well before the splash duration
+        app.splash_start = Some(Instant::now() - SPLASH_DURATION - Duration::from_secs(1));
+        let backend = ratatui::backend::TestBackend::new(80, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                assert!(!app.draw_splash(frame, area));
+            })
+            .unwrap();
+        assert!(app.splash_start.is_none());
+    }
+
+    #[test]
+    fn splash_draw_active_returns_true() {
+        let mut app = RatatuiApp::new("m".into(), "r".into(), None);
+        app.splash_start = Some(Instant::now());
+        let backend = ratatui::backend::TestBackend::new(80, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                assert!(app.draw_splash(frame, area));
+            })
+            .unwrap();
+    }
 }
