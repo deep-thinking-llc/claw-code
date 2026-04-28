@@ -12,8 +12,30 @@ pub struct StagingLock {
     pub agent_id: String,
     pub rel_path: String,
     pub version: u64,
-    acquired_at: Instant,
-    timeout: Duration,
+    pub(crate) acquired_at: Instant,
+    pub(crate) timeout: Duration,
+}
+
+/// RAII guard that automatically releases the staging lock on drop.
+pub struct StagingLockGuard<'a> {
+    lock: Option<StagingLock>,
+    staging: &'a SharedStaging,
+}
+
+impl<'a> Drop for StagingLockGuard<'a> {
+    fn drop(&mut self) {
+        if let Some(ref lock) = self.lock {
+            self.staging.unlock(lock);
+        }
+    }
+}
+
+impl<'a> StagingLockGuard<'a> {
+    /// Take ownership of the inner `StagingLock`, preventing auto-unlock on drop.
+    /// Call this only if you intend to manage the lock lifecycle manually.
+    pub fn into_inner(mut self) -> StagingLock {
+        self.lock.take().expect("lock present")
+    }
 }
 
 #[derive(Debug, Default)]
@@ -57,6 +79,7 @@ impl SharedStaging {
         Ok(())
     }
 
+    /// Validate that a relative path does not escape the staging root.
     fn validate_path(rel_path: &str) -> Result<(), String> {
         let normalized = Path::new(rel_path);
         let mut components = Vec::new();
@@ -80,6 +103,26 @@ impl SharedStaging {
         Ok(())
     }
 
+    fn validate_task_id(task_id: &str) -> Result<(), String> {
+        Self::validate_path(task_id)
+    }
+
+    /// Remove expired locks from memory. Called lazily on `lock` and `lock_guard`.
+    fn sweep_expired(&self) {
+        let mut state = self.state.lock().expect("state lock");
+        let now = Instant::now();
+        state.file_locks.retain(|_, (_, _, at, tmo)| now.duration_since(*at) <= *tmo);
+    }
+
+    fn atomic_write(path: &Path, content: &[u8]) -> Result<(), String> {
+        let tmp = path.with_extension("tmp");
+        std::fs::write(&tmp, content)
+            .map_err(|e| format!("write tmp failed: {e}"))?;
+        std::fs::rename(&tmp, path)
+            .map_err(|e| format!("rename failed: {e}"))?;
+        Ok(())
+    }
+
     pub fn write(
         &self,
         task_id: &str,
@@ -87,6 +130,7 @@ impl SharedStaging {
         rel_path: &str,
         content: &str,
     ) -> Result<(), String> {
+        Self::validate_task_id(task_id)?;
         Self::validate_path(rel_path)?;
         let lock_key = format!("{task_id}/{rel_path}");
         {
@@ -99,10 +143,13 @@ impl SharedStaging {
         }
         let path = self.resolve_path(task_id, rel_path);
         Self::ensure_dir(&path)?;
-        std::fs::write(&path, content).map_err(|e| format!("write failed: {e}"))
+        Self::atomic_write(&path, content.as_bytes())
+            .map_err(|e| format!("write failed: {e}"))
     }
 
-    pub fn read(&self, task_id: &str, rel_path: &str) -> Result<String, String> {
+    pub fn read(&self, task_id: &str, rel_path: &str
+    ) -> Result<String, String> {
+        Self::validate_task_id(task_id)?;
         Self::validate_path(rel_path)?;
         let path = self.resolve_path(task_id, rel_path);
         std::fs::read_to_string(&path).map_err(|e| format!("read failed: {e}"))
@@ -134,7 +181,9 @@ impl SharedStaging {
         agent_id: &str,
         rel_path: &str,
     ) -> Result<StagingLock, String> {
+        Self::validate_task_id(task_id)?;
         Self::validate_path(rel_path)?;
+        self.sweep_expired();
         let lock_key = format!("{task_id}/{rel_path}");
         let mut state = self.state.lock().map_err(|e| format!("lock: {e}"))?;
 
@@ -172,6 +221,20 @@ impl SharedStaging {
         })
     }
 
+    /// Acquire a lock and return an RAII guard that auto-releases on drop.
+    pub fn lock_guard(
+        &self,
+        task_id: &str,
+        agent_id: &str,
+        rel_path: &str,
+    ) -> Result<StagingLockGuard, String> {
+        let lock = self.lock(task_id, agent_id, rel_path)?;
+        Ok(StagingLockGuard {
+            lock: Some(lock),
+            staging: self,
+        })
+    }
+
     pub fn unlock(&self, lock: &StagingLock) {
         let lock_key = format!("{}/{}", lock.task_id, lock.rel_path);
         let mut state = self.state.lock().expect("state lock");
@@ -188,11 +251,14 @@ impl SharedStaging {
         rel_path: &str,
         workspace_root: &Path,
     ) -> Result<(), String> {
+        Self::validate_task_id(task_id)?;
         Self::validate_path(rel_path)?;
         let src = self.resolve_path(task_id, rel_path);
         let dst = workspace_root.join(rel_path);
         Self::ensure_dir(&dst)?;
-        std::fs::copy(&src, &dst).map_err(|e| format!("promote failed: {e}"))?;
+        let tmp = dst.with_extension("tmp");
+        std::fs::copy(&src, &tmp).map_err(|e| format!("promote failed: {e}"))?;
+        std::fs::rename(&tmp, &dst).map_err(|e| format!("rename failed: {e}"))?;
         Ok(())
     }
 }
@@ -247,7 +313,8 @@ mod tests {
 
     #[test]
     fn lock_timeout() {
-        let s = SharedStaging::new(PathBuf::from("/tmp/s"))
+        let dir = tempfile::tempdir().unwrap();
+        let s = SharedStaging::new(dir.path().join("staging"))
             .with_lock_timeout(Duration::from_millis(1));
         let _ = s.lock("t1", "a", "f.rs").unwrap();
         std::thread::sleep(Duration::from_millis(5));
@@ -278,5 +345,54 @@ mod tests {
     fn path_traversal_blocked() {
         assert!(SharedStaging::validate_path("../../etc/passwd").is_err());
         assert!(SharedStaging::validate_path("good/path.rs").is_ok());
+    }
+
+    #[test]
+    fn task_id_traversal_blocked() {
+        let (s, _d) = staging();
+        let result = s.lock("../../etc", "a", "passwd");
+        assert!(result.is_err(), "task_id should be validated");
+    }
+
+    #[test]
+    fn task_id_absolute_blocked() {
+        let (s, _d) = staging();
+        let result = s.lock("/etc", "a", "passwd");
+        assert!(result.is_err(), "absolute task_id should be blocked");
+    }
+
+    #[test]
+    fn lock_guard_auto_releases() {
+        let (s, _d) = staging();
+        {
+            let _guard = s.lock_guard("t1", "a", "g.rs").unwrap();
+            // lock held
+            assert!(s.lock("t1", "b", "g.rs").is_err());
+        }
+        // guard dropped, lock released
+        assert!(s.lock("t1", "b", "g.rs").is_ok());
+    }
+
+    #[test]
+    fn sweep_removes_expired() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = SharedStaging::new(dir.path().join("staging"))
+            .with_lock_timeout(Duration::from_millis(10));
+        let _lock = s.lock("t1", "a", "sweep.rs").unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        // next lock() sweeps expired
+        let result = s.lock("t1", "b", "sweep.rs");
+        assert!(result.is_ok(), "expired lock should have been swept");
+    }
+
+    #[test]
+    fn atomic_write_no_tmp_leaked() {
+        let (s, _d) = staging();
+        let _guard = s.lock_guard("t1", "a", "atomic.txt").unwrap();
+        s.write("t1", "a", "atomic.txt", "hello").unwrap();
+        // No .tmp file should remain
+        let path = s.resolve_path("t1", "atomic.txt");
+        assert!(path.exists());
+        assert!(!path.with_extension("tmp").exists());
     }
 }

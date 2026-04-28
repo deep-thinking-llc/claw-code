@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
-use std::fs::{self, File};
-use std::io::{self, Read};
+use std::fs;
+use std::io;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -489,8 +489,13 @@ fn base64url_encode(bytes: &[u8]) -> String {
 }
 
 fn percent_encode(value: &str) -> String {
-    percent_encoding::percent_encode(value.as_bytes(), percent_encoding::NON_ALPHANUMERIC)
-        .to_string()
+    use percent_encoding::AsciiSet;
+    const QUERY: &AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+        .remove(b'-')
+        .remove(b'_')
+        .remove(b'.')
+        .remove(b'~');
+    percent_encoding::percent_encode(value.as_bytes(), QUERY).to_string()
 }
 
 fn percent_decode(value: &str) -> Result<String, String> {
@@ -503,13 +508,15 @@ fn percent_decode(value: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     use super::{
         clear_oauth_credentials, code_challenge_s256, credentials_path, generate_pkce_pair,
-        generate_state, load_oauth_credentials, loopback_redirect_uri, parse_oauth_callback_query,
-        parse_oauth_callback_request_target, save_oauth_credentials, OAuthAuthorizationRequest,
-        OAuthConfig, OAuthRefreshRequest, OAuthTokenExchangeRequest, OAuthTokenSet,
+        generate_random_token, generate_state, load_oauth_credentials, loopback_redirect_uri,
+        parse_oauth_callback_query, parse_oauth_callback_request_target,
+        parse_oauth_callback_request_target_unvalidated, save_oauth_credentials,
+        OAuthAuthorizationRequest, OAuthConfig, OAuthFlowStore, OAuthRefreshRequest,
+        OAuthTokenExchangeRequest, OAuthTokenSet, PendingOAuthFlow,
     };
 
     fn sample_config() -> OAuthConfig {
@@ -635,10 +642,118 @@ mod tests {
         assert_eq!(params.state.as_deref(), Some("state-1"));
         assert_eq!(params.error_description.as_deref(), Some("needs login"));
 
-        let params = parse_oauth_callback_request_target("/callback?code=abc&state=xyz")
+        let params = parse_oauth_callback_request_target_unvalidated("/callback?code=abc&state=xyz")
             .expect("parse callback target");
         assert_eq!(params.code.as_deref(), Some("abc"));
         assert_eq!(params.state.as_deref(), Some("xyz"));
-        assert!(parse_oauth_callback_request_target("/wrong?code=abc").is_err());
+        assert!(parse_oauth_callback_request_target_unvalidated("/wrong?code=abc").is_err());
+    }
+
+    #[test]
+    fn valid_state_exchanges() {
+        let store = OAuthFlowStore::new(Duration::from_secs(600));
+        store.register(PendingOAuthFlow {
+            state: "state-123".to_string(),
+            code_verifier: "verifier-abc".to_string(),
+            redirect_uri: "http://localhost:4545/callback".to_string(),
+            created_at: Instant::now(),
+        });
+        let params = parse_oauth_callback_request_target("/callback?code=abc&state=state-123", &store)
+            .expect("should validate state");
+        assert_eq!(params.code.as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn mismatched_state_rejected() {
+        let store = OAuthFlowStore::new(Duration::from_secs(600));
+        store.register(PendingOAuthFlow {
+            state: "state-real".to_string(),
+            code_verifier: "verifier-abc".to_string(),
+            redirect_uri: "http://localhost:4545/callback".to_string(),
+            created_at: Instant::now(),
+        });
+        let result = parse_oauth_callback_request_target("/callback?code=abc&state=state-fake", &store);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[test]
+    fn missing_state_rejected() {
+        let store = OAuthFlowStore::new(Duration::from_secs(600));
+        let result = parse_oauth_callback_request_target("/callback?code=abc", &store);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing state"));
+    }
+
+    #[test]
+    fn expired_state_rejected() {
+        let store = OAuthFlowStore::new(Duration::from_millis(1));
+        store.register(PendingOAuthFlow {
+            state: "old-state".to_string(),
+            code_verifier: "verifier-abc".to_string(),
+            redirect_uri: "http://localhost:4545/callback".to_string(),
+            created_at: Instant::now(),
+        });
+        std::thread::sleep(Duration::from_millis(5));
+        let result = parse_oauth_callback_request_target("/callback?code=abc&state=old-state", &store);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expired"));
+    }
+
+    #[test]
+    fn replay_state_rejected() {
+        let store = OAuthFlowStore::new(Duration::from_secs(600));
+        store.register(PendingOAuthFlow {
+            state: "replay-state".to_string(),
+            code_verifier: "verifier-abc".to_string(),
+            redirect_uri: "http://localhost:4545/callback".to_string(),
+            created_at: Instant::now(),
+        });
+        parse_oauth_callback_request_target("/callback?code=abc&state=replay-state", &store)
+            .expect("first use succeeds");
+        let result = parse_oauth_callback_request_target("/callback?code=abc&state=replay-state", &store);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[test]
+    fn credentials_file_mode_is_restricted() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _guard = env_lock();
+            let config_home = temp_config_home();
+            std::env::set_var("CLAW_CONFIG_HOME", &config_home);
+            let path = credentials_path().expect("credentials path");
+            std::fs::create_dir_all(path.parent().expect("parent")).expect("create parent");
+
+            let token_set = OAuthTokenSet {
+                access_token: "at".to_string(),
+                refresh_token: None,
+                expires_at: None,
+                scopes: vec![],
+            };
+            save_oauth_credentials(&token_set).expect("save");
+
+            let meta = std::fs::metadata(&path).expect("stat");
+            let mode = meta.permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "credentials file must be 0o600");
+
+            let parent_meta = std::fs::metadata(path.parent().unwrap()).expect("stat dir");
+            let parent_mode = parent_meta.permissions().mode() & 0o777;
+            assert_eq!(parent_mode, 0o700, ".claw directory must be 0o700");
+
+            std::env::remove_var("CLAW_CONFIG_HOME");
+            let _ = std::fs::remove_dir_all(&config_home);
+        }
+    }
+
+    #[test]
+    fn generate_random_token_non_empty_and_unique() {
+        let a = generate_random_token(32).expect("token a");
+        let b = generate_random_token(32).expect("token b");
+        assert!(!a.is_empty());
+        assert!(!b.is_empty());
+        assert_ne!(a, b, "random tokens should be unique");
     }
 }

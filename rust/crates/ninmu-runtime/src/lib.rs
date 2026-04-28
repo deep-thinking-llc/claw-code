@@ -115,8 +115,9 @@ pub use mcp_stdio::{
 pub use oauth::{
     clear_oauth_credentials, code_challenge_s256, credentials_path, generate_pkce_pair,
     generate_state, load_oauth_credentials, loopback_redirect_uri, parse_oauth_callback_query,
-    parse_oauth_callback_request_target, save_oauth_credentials, OAuthAuthorizationRequest,
-    OAuthCallbackParams, OAuthRefreshRequest, OAuthTokenExchangeRequest, OAuthTokenSet,
+    parse_oauth_callback_request_target, parse_oauth_callback_request_target_unvalidated,
+    save_oauth_credentials, OAuthAuthorizationRequest, OAuthCallbackParams, OAuthFlowStore,
+    OAuthRefreshRequest, OAuthTokenExchangeRequest, OAuthTokenSet, PendingOAuthFlow,
     PkceChallengeMethod, PkceCodePair,
 };
 pub use permissions::{
