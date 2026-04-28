@@ -10,7 +10,7 @@ use ninmu_runtime::{
 };
 use ninmu_telemetry::{AnalyticsEvent, AnthropicRequestProfile, ClientIdentity, SessionTracer};
 use serde::Deserialize;
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
 use crate::error::ApiError;
 use crate::http_client::build_http_client_or_default;
@@ -468,6 +468,7 @@ impl AnthropicClient {
         let request_url = format!("{}/v1/messages", self.base_url.trim_end_matches('/'));
         let mut request_body = self.request_profile.render_json_body(request)?;
         strip_unsupported_beta_body_fields(&mut request_body);
+        inject_prompt_cache_control(&mut request_body);
         let request_builder = self.build_request(&request_url).json(&request_body);
         request_builder.send().await.map_err(ApiError::from)
     }
@@ -529,6 +530,7 @@ impl AnthropicClient {
         );
         let mut request_body = self.request_profile.render_json_body(request)?;
         strip_unsupported_beta_body_fields(&mut request_body);
+        inject_prompt_cache_control(&mut request_body);
         let response = self
             .build_request(&request_url)
             .json(&request_body)
@@ -971,6 +973,77 @@ fn strip_unsupported_beta_body_fields(body: &mut Value) {
         if let Some(stop_val) = object.remove("stop") {
             if stop_val.as_array().is_some_and(|a| !a.is_empty()) {
                 object.insert("stop_sequences".to_string(), stop_val);
+            }
+        }
+    }
+}
+
+/// Inject `cache_control: {type: "ephemeral"}` into the request body for
+/// Anthropic prompt caching. This mutates the JSON value in-place.
+///
+/// Strategy:
+/// - Convert `system` string → array of text blocks with cache_control.
+/// - Add cache_control to all tool definitions.
+/// - Add cache_control to all message content blocks except the last 2 messages.
+pub fn inject_prompt_cache_control(body: &mut Value) {
+    let Some(object) = body.as_object_mut() else {
+        return;
+    };
+
+    // 1. System prompt: convert string to array of blocks with cache_control.
+    if let Some(system) = object.get_mut("system") {
+        if let Some(text) = system.as_str() {
+            *system = json!([{
+                "type": "text",
+                "text": text,
+                "cache_control": {"type": "ephemeral"}
+            }]);
+        }
+    }
+
+    // 2. Tool definitions: add cache_control to each tool.
+    if let Some(tools) = object.get_mut("tools") {
+        if let Some(array) = tools.as_array_mut() {
+            for tool in array {
+                if let Some(tool_obj) = tool.as_object_mut() {
+                    tool_obj.insert("cache_control".to_string(), json!({"type": "ephemeral"}));
+                }
+            }
+        }
+    }
+
+    // 3. Messages: add cache_control to all but the last 2 messages.
+    if let Some(messages) = object.get_mut("messages") {
+        if let Some(array) = messages.as_array_mut() {
+            let cacheable_count = array.len().saturating_sub(2);
+            for msg in array.iter_mut().take(cacheable_count) {
+                if let Some(msg_obj) = msg.as_object_mut() {
+                    if let Some(content) = msg_obj.get_mut("content") {
+                        inject_cache_control_into_content(content);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Recursively add cache_control to all text/tool_use content blocks.
+fn inject_cache_control_into_content(content: &mut Value) {
+    if let Some(text) = content.as_str() {
+        *content = json!([{
+            "type": "text",
+            "text": text,
+            "cache_control": {"type": "ephemeral"}
+        }]);
+        return;
+    }
+    if let Some(array) = content.as_array_mut() {
+        for block in array {
+            if let Some(obj) = block.as_object_mut() {
+                let block_type = obj.get("type").and_then(|t| t.as_str());
+                if block_type == Some("text") || block_type == Some("tool_use") {
+                    obj.insert("cache_control".to_string(), json!({"type": "ephemeral"}));
+                }
             }
         }
     }
@@ -1692,5 +1765,68 @@ mod tests {
             enriched,
             crate::error::ApiError::InvalidSseFrame(_)
         ));
+    }
+
+    #[test]
+    fn inject_prompt_cache_control_adds_ephemeral_markers() {
+        use serde_json::json;
+
+        let mut body = json!({
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 1024,
+            "system": "You are a helpful assistant.",
+            "messages": [
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there"},
+                {"role": "user", "content": "How are you?"},
+            ],
+            "tools": [
+                {"name": "read_file", "description": "Reads a file", "input_schema": {"type": "object"}}
+            ]
+        });
+
+        super::inject_prompt_cache_control(&mut body);
+
+        // System should be converted to array with cache_control
+        let system = body.get("system").unwrap();
+        assert!(system.is_array());
+        let system_arr = system.as_array().unwrap();
+        assert_eq!(system_arr.len(), 1);
+        assert_eq!(system_arr[0]["type"], "text");
+        assert_eq!(system_arr[0]["cache_control"]["type"], "ephemeral");
+
+        // Tools should have cache_control
+        let tools = body.get("tools").unwrap().as_array().unwrap();
+        assert_eq!(tools[0]["cache_control"]["type"], "ephemeral");
+
+        // Messages: first message (index 0) should have cache_control since we have 3 messages
+        // and we skip the last 2. So only index 0 gets it.
+        let messages = body.get("messages").unwrap().as_array().unwrap();
+        assert_eq!(messages.len(), 3);
+        let msg0_content = messages[0]["content"].as_array().unwrap();
+        assert_eq!(msg0_content[0]["cache_control"]["type"], "ephemeral");
+
+        // Last 2 messages should NOT have cache_control (they keep string format)
+        assert!(messages[1]["content"].is_string());
+        assert!(messages[2]["content"].is_string());
+    }
+
+    #[test]
+    fn inject_prompt_cache_control_skips_when_too_few_messages() {
+        use serde_json::json;
+
+        let mut body = json!({
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 1024,
+            "messages": [
+                {"role": "user", "content": "Hello"},
+            ],
+        });
+
+        super::inject_prompt_cache_control(&mut body);
+
+        // With only 1 message, no messages get cache_control (all are in last 2)
+        let messages = body.get("messages").unwrap().as_array().unwrap();
+        assert!(messages[0]["content"].is_string());
     }
 }

@@ -2,6 +2,8 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::config::{ConfigError, ConfigLoader, RuntimeConfig};
 use crate::git_context::GitContext;
@@ -428,7 +430,60 @@ fn collapse_blank_lines(content: &str) -> String {
     result
 }
 
+/// Cache entry for a discovered project context.
+#[derive(Debug, Clone)]
+struct CachedProjectContext {
+    context: ProjectContext,
+    cached_at: Instant,
+}
+
+/// TTL for cached git context. Git state rarely changes within a single
+/// session turn, so a 5-second cache eliminates redundant subprocess calls.
+const GIT_CONTEXT_CACHE_TTL: Duration = Duration::from_secs(5);
+
+/// Global cache for system prompt project context, keyed by cwd + date.
+static PROJECT_CONTEXT_CACHE: OnceLock<
+    Mutex<std::collections::HashMap<String, CachedProjectContext>>,
+> = OnceLock::new();
+
+fn project_context_cache() -> &'static Mutex<std::collections::HashMap<String, CachedProjectContext>>
+{
+    PROJECT_CONTEXT_CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Load project context with caching. Git status/diff are expensive
+/// (subprocess calls), so we cache them for a short TTL.
+fn load_project_context_cached(cwd: &Path, current_date: &str) -> std::io::Result<ProjectContext> {
+    let cache_key = format!("{}:{}", cwd.display(), current_date);
+    let now = Instant::now();
+
+    {
+        let cache = project_context_cache()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(entry) = cache.get(&cache_key) {
+            if now.duration_since(entry.cached_at) < GIT_CONTEXT_CACHE_TTL {
+                return Ok(entry.context.clone());
+            }
+        }
+    }
+
+    let context = ProjectContext::discover_with_git(cwd, current_date)?;
+    let mut cache = project_context_cache()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    cache.insert(
+        cache_key,
+        CachedProjectContext {
+            context: context.clone(),
+            cached_at: now,
+        },
+    );
+    Ok(context)
+}
+
 /// Loads config and project context, then renders the system prompt text.
+/// Uses caching for project context to avoid redundant git subprocess calls.
 pub fn load_system_prompt(
     cwd: impl Into<PathBuf>,
     current_date: impl Into<String>,
@@ -436,7 +491,8 @@ pub fn load_system_prompt(
     os_version: impl Into<String>,
 ) -> Result<Vec<String>, PromptBuildError> {
     let cwd = cwd.into();
-    let project_context = ProjectContext::discover_with_git(&cwd, current_date.into())?;
+    let current_date = current_date.into();
+    let project_context = load_project_context_cached(&cwd, &current_date)?;
     let config = ConfigLoader::default_for(&cwd).load()?;
     Ok(SystemPromptBuilder::new()
         .with_os(os_name, os_version)

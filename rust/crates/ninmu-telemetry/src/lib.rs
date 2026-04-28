@@ -69,6 +69,7 @@ impl AnthropicRequestProfile {
             betas: vec![
                 DEFAULT_AGENTIC_BETA.to_string(),
                 DEFAULT_PROMPT_CACHING_SCOPE_BETA.to_string(),
+                "prompt-caching-2024-07-31".to_string(),
             ],
             extra_body: Map::new(),
         }
@@ -449,7 +450,7 @@ mod tests {
                 ("user-agent".to_string(), "claude-code/1.2.3".to_string()),
                 (
                     "anthropic-beta".to_string(),
-                    "claude-code-20250219,prompt-caching-scope-2026-01-05,tools-2026-04-01"
+                    "claude-code-20250219,prompt-caching-scope-2026-01-05,prompt-caching-2024-07-31,tools-2026-04-01"
                         .to_string(),
                 ),
             ]
@@ -467,6 +468,7 @@ mod tests {
             serde_json::json!([
                 "claude-code-20250219",
                 "prompt-caching-scope-2026-01-05",
+                "prompt-caching-2024-07-31",
                 "tools-2026-04-01"
             ])
         );

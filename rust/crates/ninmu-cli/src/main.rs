@@ -1693,6 +1693,7 @@ fn run_resume_command(
         | SlashCommand::Context { .. }
         | SlashCommand::Color { .. }
         | SlashCommand::Effort { .. }
+        | SlashCommand::Think { .. }
         | SlashCommand::Branch { .. }
         | SlashCommand::Rewind { .. }
         | SlashCommand::Ide { .. }

@@ -43,6 +43,11 @@ const ACCENT: Color = Color::Rgb(255, 107, 53);
 const ERROR_COLOR: Color = Color::Rgb(203, 80, 80);
 const SUCCESS: Color = Color::Rgb(70, 180, 70);
 const THINKING_COLOR: Color = Color::Rgb(136, 100, 220);
+const USER_COLOR: Color = Color::Rgb(80, 200, 120);
+const USER_COLOR_DIM: Color = Color::Rgb(40, 100, 60);
+const LLM_COLOR: Color = Color::Rgb(200, 200, 230);
+const CODE_BG: Color = Color::Rgb(28, 28, 36);
+const CODE_FG: Color = Color::Rgb(180, 210, 240);
 
 // -- Spinner frames -----------------------------------------------------------
 const SPINNER: &[&str] = &[
@@ -346,7 +351,7 @@ impl RatatuiApp {
                                 }
                                 self.history_index = None;
                                 self.history_restore_buf.clear();
-                                self.scrollback.push(format!("  > {input}"));
+                                self.scrollback.push(format!("  \u{25B8} {input}"));
 
                                 match start_turn(&input) {
                                     Ok(handle) => {
@@ -579,7 +584,12 @@ impl RatatuiApp {
 
     fn flush_response(&mut self) {
         if !self.response_text.is_empty() {
-            self.scrollback.push_str(&self.response_text);
+            for line in self.response_text.lines() {
+                self.scrollback.push(format!("  \u{25A0} {line}"));
+            }
+            if self.response_text.ends_with('\n') {
+                self.scrollback.push(String::new());
+            }
             self.response_text.clear();
         }
         let total_tokens = self.usage.input_tokens + self.usage.output_tokens;
@@ -619,7 +629,7 @@ impl RatatuiApp {
         let mut parts = text.split('\n');
         let remainder = parts.next_back().unwrap_or("").to_string();
         for part in parts {
-            self.scrollback.push(part.to_string());
+            self.scrollback.push(format!("  \u{25A0} {part}"));
         }
         self.response_text = remainder;
     }
@@ -634,18 +644,17 @@ impl RatatuiApp {
     /// Load previous conversation history into the scrollback.
     pub fn load_conversation_history(&mut self, messages: &[ConversationMessage]) {
         for msg in messages {
-            let role_marker = match msg.role {
-                MessageRole::User => "> ",
-                MessageRole::Assistant => "",
-                _ => continue,
-            };
+            match msg.role {
+                MessageRole::System | MessageRole::Tool => continue,
+                MessageRole::User | MessageRole::Assistant => {}
+            }
             for block in &msg.blocks {
                 match block {
                     ContentBlock::Text { text } => {
-                        let prefix = if role_marker.is_empty() {
-                            String::new()
-                        } else {
-                            format!("  {role_marker}")
+                        let prefix = match msg.role {
+                            MessageRole::User => "  \u{25B8} ",
+                            MessageRole::Assistant => "  \u{25A0} ",
+                            _ => "  ",
                         };
                         for line in text.lines() {
                             self.scrollback.push(format!("{prefix}{line}"));
@@ -769,41 +778,119 @@ impl RatatuiApp {
         let viewport_height = area.height as usize;
         let (visible, _, _total) = self.scrollback.visible(viewport_height);
 
+        // Pre-compute pulsing green brightness for the current user prompt.
+        // Oscillates between USER_COLOR and USER_COLOR_DIM.
+        let pulse_t = if self.state.is_generating {
+            // Use a sine-like oscillation from spinner_frame (0..24 range).
+            let phase = (self.spinner_frame % 8) as f32 / 8.0;
+            (phase * std::f32::consts::PI).sin().abs()
+        } else {
+            1.0
+        };
+        let pulse_green = lerp_u8(USER_COLOR_DIM.g(), USER_COLOR.g(), pulse_t);
+        let user_prompt_color = Color::Rgb(
+            lerp_u8(USER_COLOR_DIM.r(), USER_COLOR.r(), pulse_t),
+            pulse_green,
+            lerp_u8(USER_COLOR_DIM.b(), USER_COLOR.b(), pulse_t),
+        );
+
+        let mut in_code_block = false;
         let mut lines: Vec<Line> = visible
             .iter()
             .map(|s| {
                 let s = s.trim_end();
-                // Apply ratatui-native styling based on line content.
+                // -- User prompt: ▸ prefix --
+                if let Some(rest) = s.strip_prefix("  \u{25B8} ") {
+                    return Line::from(vec![
+                        Span::styled(
+                            "  \u{25B8} ",
+                            Style::default()
+                                .fg(user_prompt_color)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(rest.to_string(), Style::default().fg(user_prompt_color)),
+                    ]);
+                }
+                // Legacy "  > " prefix (session resume, tests)
                 if let Some(rest) = s.strip_prefix("  > ") {
-                    // User prompt: accent-colored prompt marker
-                    Line::from(vec![
-                        Span::styled("  > ", Style::default().fg(ACCENT)),
-                        Span::styled(rest.to_string(), Style::default().fg(TEXT)),
-                    ])
-                } else if let Some(rest) = s.strip_prefix("  error:") {
-                    Line::from(vec![
+                    return Line::from(vec![
+                        Span::styled(
+                            "  \u{25B8} ",
+                            Style::default()
+                                .fg(user_prompt_color)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(rest.to_string(), Style::default().fg(user_prompt_color)),
+                    ]);
+                }
+                // -- LLM response: ■ prefix --
+                if let Some(rest) = s.strip_prefix("  \u{25A0} ") {
+                    // Detect fenced code block open/close
+                    let trimmed = rest.trim();
+                    if trimmed.starts_with("```") {
+                        in_code_block = !in_code_block;
+                        if in_code_block {
+                            // Opening fence — show language tag
+                            let lang = trimmed.strip_prefix("`").unwrap_or("");
+                            return Line::from(vec![
+                                Span::styled("  \u{25A0} ", Style::default().fg(LLM_COLOR)),
+                                Span::styled(
+                                    format!("{lang}"),
+                                    Style::default().fg(MUTED).bg(CODE_BG),
+                                ),
+                            ]);
+                        }
+                        // Closing fence
+                        return Line::from(vec![
+                            Span::styled("  \u{25A0} ", Style::default().fg(LLM_COLOR)),
+                            Span::styled("```".to_string(), Style::default().fg(MUTED).bg(CODE_BG)),
+                        ]);
+                    }
+                    if in_code_block {
+                        // Code line: monochrome on dark background
+                        return Line::from(vec![
+                            Span::styled("  \u{25A0} ", Style::default().fg(LLM_COLOR)),
+                            Span::styled(
+                                rest.to_string(),
+                                Style::default().fg(CODE_FG).bg(CODE_BG),
+                            ),
+                        ]);
+                    }
+                    // Regular LLM text with inline markdown
+                    let mut spans =
+                        vec![Span::styled("  \u{25A0} ", Style::default().fg(LLM_COLOR))];
+                    spans.extend(markdown_spans(rest));
+                    return Line::from(spans);
+                }
+                // -- Error --
+                if let Some(rest) = s.strip_prefix("  error:") {
+                    return Line::from(vec![
                         Span::styled("  error:", Style::default().fg(ERROR_COLOR)),
                         Span::styled(rest.to_string(), Style::default().fg(TEXT)),
-                    ])
-                } else if s.starts_with("  -- ") {
-                    // Tool use marker
-                    Line::from(Span::styled(s.to_string(), Style::default().fg(MUTED)))
-                } else if let Some(rest) = s.strip_prefix("  ok ") {
-                    Line::from(vec![
+                    ]);
+                }
+                // -- Tool use --
+                if s.starts_with("  -- ") {
+                    return Line::from(Span::styled(s.to_string(), Style::default().fg(MUTED)));
+                }
+                // -- Tool result --
+                if let Some(rest) = s.strip_prefix("  ok ") {
+                    return Line::from(vec![
                         Span::styled("  ok", Style::default().fg(SUCCESS)),
                         Span::styled(rest.to_string(), Style::default().fg(TEXT_SEC)),
-                    ])
-                } else if let Some(rest) = s.strip_prefix("  fail ") {
-                    Line::from(vec![
+                    ]);
+                }
+                if let Some(rest) = s.strip_prefix("  fail ") {
+                    return Line::from(vec![
                         Span::styled("  fail", Style::default().fg(ERROR_COLOR)),
                         Span::styled(rest.to_string(), Style::default().fg(TEXT_SEC)),
-                    ])
-                } else if s.starts_with("  [cancelled]") {
-                    Line::from(Span::styled(s.to_string(), Style::default().fg(MUTED)))
-                } else {
-                    // Apply inline markdown formatting
-                    Line::from(markdown_spans(s))
+                    ]);
                 }
+                if s.starts_with("  [cancelled]") {
+                    return Line::from(Span::styled(s.to_string(), Style::default().fg(MUTED)));
+                }
+                // -- Fallback: plain text with markdown --
+                Line::from(markdown_spans(s))
             })
             .collect();
 
@@ -814,7 +901,7 @@ impl RatatuiApp {
                 } else {
                     " "
                 };
-                let partial = format!("{}{cursor_char}", self.response_text);
+                let partial = format!("  \u{25A0} {}{cursor_char}", self.response_text);
                 lines.push(Line::from(markdown_spans(&partial)));
             }
 
@@ -1192,6 +1279,39 @@ fn format_tokens(count: u32) -> String {
     }
 }
 
+/// Linear interpolation between two u8 values.
+fn lerp_u8(a: u8, b: u8, t: f32) -> u8 {
+    (a as f32 + (b as f32 - a as f32) * t) as u8
+}
+
+/// Extract the RGB components from a [`Color::Rgb`].
+trait RgbComponent {
+    fn r(&self) -> u8;
+    fn g(&self) -> u8;
+    fn b(&self) -> u8;
+}
+
+impl RgbComponent for Color {
+    fn r(&self) -> u8 {
+        match self {
+            Color::Rgb(r, _, _) => *r,
+            _ => 0,
+        }
+    }
+    fn g(&self) -> u8 {
+        match self {
+            Color::Rgb(_, g, _) => *g,
+            _ => 0,
+        }
+    }
+    fn b(&self) -> u8 {
+        match self {
+            Color::Rgb(_, _, b) => *b,
+            _ => 0,
+        }
+    }
+}
+
 fn help_line<'a>(key: &str, desc: &str) -> Line<'a> {
     Line::from(vec![
         Span::raw("  "),
@@ -1445,7 +1565,7 @@ mod tests {
         ];
         app.load_conversation_history(&messages);
         let all = app.scrollback.visible(usize::MAX).0;
-        let has_user = all.iter().any(|l| l.contains("> Hello AI"));
+        let has_user = all.iter().any(|l| l.contains("\u{25B8} Hello AI"));
         let has_assistant = all.iter().any(|l| l.contains("Hi human!"));
         let has_separator = all.iter().any(|l| l.contains("session resumed"));
         assert!(has_user, "should show user message");
@@ -1626,7 +1746,7 @@ mod tests {
         assert!(app.dirty);
         let all = app.scrollback.visible(usize::MAX).0;
         let has_old = all.iter().any(|l| l.contains("old line"));
-        let has_new = all.iter().any(|l| l.contains("> new message"));
+        let has_new = all.iter().any(|l| l.contains("\u{25B8} new message"));
         let has_separator = all.iter().any(|l| l.contains("session resumed"));
         assert!(!has_old, "old content should be cleared");
         assert!(has_new, "new messages should appear");
@@ -1718,5 +1838,162 @@ mod tests {
         app.input_buf.clear();
         app.refresh_input_cache();
         assert_eq!(app.cached_input, "");
+    }
+
+    // -- ReasoningUpdate / ModelUpdate event tests --------------------------
+
+    #[test]
+    fn reasoning_update_sets_effort_and_thinking() {
+        let mut app = RatatuiApp::new("deepseek-reasoner".into(), "write".into(), None);
+        assert!(app.reasoning_effort.is_none());
+        assert!(app.thinking_mode.is_none());
+
+        app.process_event(TuiEvent::ReasoningUpdate {
+            effort: Some("high".to_string()),
+            thinking: Some(true),
+        });
+        assert_eq!(app.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(app.thinking_mode, Some(true));
+    }
+
+    #[test]
+    fn reasoning_update_rebuilds_header() {
+        let mut app = RatatuiApp::new("deepseek-reasoner".into(), "write".into(), None);
+        app.dirty = false;
+        app.process_event(TuiEvent::ReasoningUpdate {
+            effort: Some("max".to_string()),
+            thinking: Some(false),
+        });
+        assert!(app.dirty, "ReasoningUpdate must set dirty flag");
+        let header_text = format!("{:?}", app.cached_header);
+        assert!(
+            header_text.contains("max"),
+            "header must show effort level: {header_text}"
+        );
+        assert!(
+            header_text.contains("off"),
+            "header must show thinking=off: {header_text}"
+        );
+    }
+
+    #[test]
+    fn reasoning_update_clears_state() {
+        let mut app = RatatuiApp::new("deepseek-reasoner".into(), "write".into(), None);
+        app.process_event(TuiEvent::ReasoningUpdate {
+            effort: Some("high".to_string()),
+            thinking: Some(true),
+        });
+        // Now clear
+        app.process_event(TuiEvent::ReasoningUpdate {
+            effort: None,
+            thinking: None,
+        });
+        assert!(app.reasoning_effort.is_none());
+        assert!(app.thinking_mode.is_none());
+        let header_text = format!("{:?}", app.cached_header);
+        assert!(
+            header_text.contains("auto"),
+            "header must show default thinking=auto: {header_text}"
+        );
+    }
+
+    #[test]
+    fn model_update_changes_model_and_pricing() {
+        let mut app = RatatuiApp::new("gpt-4o".into(), "write".into(), None);
+        app.dirty = false;
+        app.process_event(TuiEvent::ModelUpdate {
+            model: "claude-sonnet".to_string(),
+        });
+        assert!(app.dirty, "ModelUpdate must set dirty flag");
+        assert_eq!(app.model, "claude-sonnet");
+        // claude-sonnet should have pricing
+        assert!(
+            app.model_pricing.is_some(),
+            "claude-sonnet should have pricing"
+        );
+    }
+
+    #[test]
+    fn model_update_rebuilds_header() {
+        let mut app = RatatuiApp::new("gpt-4o".into(), "write".into(), None);
+        app.process_event(TuiEvent::ModelUpdate {
+            model: "deepseek-reasoner".to_string(),
+        });
+        let header_text = format!("{:?}", app.cached_header);
+        assert!(
+            header_text.contains("deepseek-reasoner"),
+            "header must show new model: {header_text}"
+        );
+    }
+
+    // -- set_reasoning_effort / set_thinking_mode public API tests ----------
+
+    #[test]
+    fn set_reasoning_effort_updates_state_and_header() {
+        let mut app = RatatuiApp::new("gpt-4o".into(), "read".into(), None);
+        app.set_reasoning_effort(Some("low".to_string()));
+        assert_eq!(app.reasoning_effort.as_deref(), Some("low"));
+    }
+
+    #[test]
+    fn set_thinking_mode_updates_state_and_header() {
+        let mut app = RatatuiApp::new("deepseek-reasoner".into(), "read".into(), None);
+        app.set_thinking_mode(Some(true));
+        assert_eq!(app.thinking_mode, Some(true));
+        app.set_thinking_mode(Some(false));
+        assert_eq!(app.thinking_mode, Some(false));
+        app.set_thinking_mode(None);
+        assert!(app.thinking_mode.is_none());
+    }
+
+    // -- build_header_line content tests ------------------------------------
+
+    #[test]
+    fn header_default_shows_think_auto() {
+        let header = RatatuiApp::build_header_line("gpt-4o", "write", Some("main"), None, None);
+        let text = format!("{header:?}");
+        assert!(
+            text.contains("think"),
+            "header must contain 'think': {text}"
+        );
+        assert!(
+            text.contains("auto"),
+            "header must contain 'auto' for default thinking: {text}"
+        );
+    }
+
+    #[test]
+    fn header_shows_think_on_with_effort() {
+        let header = RatatuiApp::build_header_line(
+            "deepseek-reasoner",
+            "write",
+            Some("main"),
+            Some("high"),
+            Some(true),
+        );
+        let text = format!("{header:?}");
+        assert!(
+            text.contains("think"),
+            "header must contain 'think': {text}"
+        );
+        assert!(text.contains("on"), "header must show thinking=on: {text}");
+        assert!(text.contains("high"), "header must show effort: {text}");
+    }
+
+    #[test]
+    fn header_shows_think_off_when_disabled() {
+        let header = RatatuiApp::build_header_line(
+            "deepseek-reasoner",
+            "read",
+            None,
+            Some("max"),
+            Some(false),
+        );
+        let text = format!("{header:?}");
+        assert!(
+            text.contains("off"),
+            "header must show thinking=off: {text}"
+        );
+        assert!(text.contains("max"), "header must show effort=max: {text}");
     }
 }

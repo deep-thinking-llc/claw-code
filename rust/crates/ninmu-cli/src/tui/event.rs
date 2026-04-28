@@ -259,4 +259,59 @@ mod tests {
         assert_eq!(state.thinking_state, ThinkingState::Idle);
         assert!(state.pending_permission.is_none());
     }
+
+    #[test]
+    fn bridge_reasoning_update() {
+        let (bridge, rx) = TuiEventBridge::new();
+        bridge.reasoning_update(Some("high".to_string()), Some(true));
+        let ev = rx.recv().unwrap();
+        match ev {
+            TuiEvent::ReasoningUpdate { effort, thinking } => {
+                assert_eq!(effort.as_deref(), Some("high"));
+                assert_eq!(thinking, Some(true));
+            }
+            other => panic!("expected ReasoningUpdate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bridge_reasoning_update_with_none() {
+        let (bridge, rx) = TuiEventBridge::new();
+        bridge.reasoning_update(None, None);
+        let ev = rx.recv().unwrap();
+        match ev {
+            TuiEvent::ReasoningUpdate { effort, thinking } => {
+                assert!(effort.is_none());
+                assert!(thinking.is_none());
+            }
+            other => panic!("expected ReasoningUpdate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bridge_model_update() {
+        let (bridge, rx) = TuiEventBridge::new();
+        bridge.model_update("deepseek-reasoner".to_string());
+        let ev = rx.recv().unwrap();
+        match ev {
+            TuiEvent::ModelUpdate { model } => {
+                assert_eq!(model, "deepseek-reasoner");
+            }
+            other => panic!("expected ModelUpdate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bridge_load_history() {
+        let (bridge, rx) = TuiEventBridge::new();
+        bridge.load_history(vec![ConversationMessage {
+            role: MessageRole::User,
+            blocks: vec![ContentBlock::Text {
+                text: "test".into(),
+            }],
+            usage: None,
+        }]);
+        let ev = rx.recv().unwrap();
+        assert!(matches!(&ev, TuiEvent::LoadHistory { messages } if messages.len() == 1));
+    }
 }

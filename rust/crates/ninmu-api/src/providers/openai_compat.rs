@@ -697,7 +697,7 @@ impl StreamState {
             self.usage = Some(Usage {
                 input_tokens: usage.prompt_tokens,
                 cache_creation_input_tokens: 0,
-                cache_read_input_tokens: 0,
+                cache_read_input_tokens: usage.cache_read_input_tokens(),
                 output_tokens: usage.completion_tokens,
             });
         }
@@ -970,6 +970,20 @@ struct OpenAiUsage {
     prompt_tokens: u32,
     #[serde(default)]
     completion_tokens: u32,
+    /// OpenAI's prompt cache hit tokens (from `prompt_tokens_details.cached_tokens`).
+    #[serde(default, rename = "cached_tokens")]
+    prompt_cache_hit_tokens: u32,
+    /// DeepSeek's prompt cache hit tokens.
+    #[serde(default, rename = "prompt_cache_hit_tokens")]
+    deepseek_prompt_cache_hit_tokens: u32,
+}
+
+impl OpenAiUsage {
+    /// Returns the number of cache-read input tokens, combining
+    /// OpenAI's `cached_tokens` and DeepSeek's `prompt_cache_hit_tokens`.
+    fn cache_read_input_tokens(&self) -> u32 {
+        self.prompt_cache_hit_tokens + self.deepseek_prompt_cache_hit_tokens
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1053,6 +1067,8 @@ pub fn is_reasoning_model(model: &str) -> bool {
         || canonical.starts_with("qwen-qwq")
         || canonical.starts_with("qwq")
         || canonical.contains("thinking")
+        // Xiaomi MiMo reasoning models
+        || canonical.starts_with("mimo")
     // NOTE: Gemini 2.5 Pro/Flash have a thinking mode but they do NOT
     // reject temperature/top_p — the endpoint accepts these params even
     // when thinking is active, so they are intentionally NOT listed here.
@@ -1061,7 +1077,8 @@ pub fn is_reasoning_model(model: &str) -> bool {
 }
 
 /// Returns `true` for models that support the `thinking` toggle.
-/// This includes `DeepSeek-R1` (`deepseek-reasoner`) and Qwen3 thinking variants.
+/// This includes `DeepSeek-R1` (`deepseek-reasoner`), Qwen3 thinking
+/// variants, and Xiaomi `MiMo` reasoning models.
 #[must_use]
 pub fn is_deepseek_reasoning_model(model: &str) -> bool {
     let lowered = model.to_ascii_lowercase();
@@ -1071,6 +1088,7 @@ pub fn is_deepseek_reasoning_model(model: &str) -> bool {
         || canonical.contains("thinking")
         || canonical.starts_with("qwq")
         || canonical.starts_with("qwen-qwq")
+        || canonical.starts_with("mimo")
 }
 
 /// Strip routing prefix (e.g., "openai/gpt-4" → "gpt-4") for the wire.
@@ -1513,7 +1531,10 @@ fn normalize_response(
                 .as_ref()
                 .map_or(0, |usage| usage.prompt_tokens),
             cache_creation_input_tokens: 0,
-            cache_read_input_tokens: 0,
+            cache_read_input_tokens: response
+                .usage
+                .as_ref()
+                .map_or(0, |usage| usage.cache_read_input_tokens()),
             output_tokens: response
                 .usage
                 .as_ref()
@@ -2760,7 +2781,9 @@ mod tests {
     fn is_deepseek_reasoning_model_detects_deepseek_r1() {
         assert!(super::is_deepseek_reasoning_model("deepseek-reasoner"));
         assert!(super::is_deepseek_reasoning_model("deepseek-r1"));
-        assert!(super::is_deepseek_reasoning_model("deepseek/deepseek-reasoner"));
+        assert!(super::is_deepseek_reasoning_model(
+            "deepseek/deepseek-reasoner"
+        ));
         assert!(!super::is_deepseek_reasoning_model("deepseek-chat"));
         assert!(!super::is_deepseek_reasoning_model("gpt-4o"));
     }
@@ -2778,7 +2801,9 @@ mod tests {
     fn is_deepseek_reasoning_model_detects_mimo() {
         assert!(super::is_deepseek_reasoning_model("mimo-v2-flash"));
         assert!(super::is_deepseek_reasoning_model("mimo-7b"));
-        assert!(super::is_deepseek_reasoning_model("openrouter/xiaomi/mimo-v2-flash"));
+        assert!(super::is_deepseek_reasoning_model(
+            "openrouter/xiaomi/mimo-v2-flash"
+        ));
     }
 
     #[test]

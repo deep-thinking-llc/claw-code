@@ -380,7 +380,14 @@ const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
         name: "effort",
         aliases: &[],
         summary: "Set the effort level for responses",
-        argument_hint: Some("[low|medium|high]"),
+        argument_hint: Some("[low|medium|high|max|off]"),
+        resume_supported: true,
+    },
+    SlashCommandSpec {
+        name: "think",
+        aliases: &[],
+        summary: "Toggle thinking/reasoning mode for supported models",
+        argument_hint: Some("[on|off|auto]"),
         resume_supported: true,
     },
     SlashCommandSpec {
@@ -1158,6 +1165,9 @@ pub enum SlashCommand {
     Effort {
         level: Option<String>,
     },
+    Think {
+        mode: Option<String>,
+    },
     Branch {
         name: Option<String>,
     },
@@ -1271,6 +1281,7 @@ impl SlashCommand {
             Self::Context { .. } => "/context",
             Self::Color { .. } => "/color",
             Self::Effort { .. } => "/effort",
+            Self::Think { .. } => "/think",
             Self::Branch { .. } => "/branch",
             Self::Rewind { .. } => "/rewind",
             Self::Ide { .. } => "/ide",
@@ -1482,6 +1493,7 @@ pub fn validate_slash_command_input(
         "context" => SlashCommand::Context { action: remainder },
         "color" => SlashCommand::Color { scheme: remainder },
         "effort" => SlashCommand::Effort { level: remainder },
+        "think" => SlashCommand::Think { mode: remainder },
         "branch" => SlashCommand::Branch { name: remainder },
         "rewind" => SlashCommand::Rewind { steps: remainder },
         "ide" => SlashCommand::Ide { target: remainder },
@@ -4162,6 +4174,7 @@ pub fn handle_slash_command(
         | SlashCommand::Context { .. }
         | SlashCommand::Color { .. }
         | SlashCommand::Effort { .. }
+        | SlashCommand::Think { .. }
         | SlashCommand::Branch { .. }
         | SlashCommand::Rewind { .. }
         | SlashCommand::Ide { .. }
@@ -4504,6 +4517,102 @@ mod tests {
         );
     }
 
+    // -- /think and /effort parsing tests -----------------------------------
+
+    #[test]
+    fn parses_think_command_with_mode() {
+        assert_eq!(
+            SlashCommand::parse("/think on"),
+            Ok(Some(SlashCommand::Think {
+                mode: Some("on".to_string()),
+            }))
+        );
+        assert_eq!(
+            SlashCommand::parse("/think off"),
+            Ok(Some(SlashCommand::Think {
+                mode: Some("off".to_string()),
+            }))
+        );
+        assert_eq!(
+            SlashCommand::parse("/think auto"),
+            Ok(Some(SlashCommand::Think {
+                mode: Some("auto".to_string()),
+            }))
+        );
+    }
+
+    #[test]
+    fn parses_think_command_without_mode() {
+        assert_eq!(
+            SlashCommand::parse("/think"),
+            Ok(Some(SlashCommand::Think { mode: None }))
+        );
+    }
+
+    #[test]
+    fn parses_effort_command_with_levels() {
+        assert_eq!(
+            SlashCommand::parse("/effort low"),
+            Ok(Some(SlashCommand::Effort {
+                level: Some("low".to_string()),
+            }))
+        );
+        assert_eq!(
+            SlashCommand::parse("/effort medium"),
+            Ok(Some(SlashCommand::Effort {
+                level: Some("medium".to_string()),
+            }))
+        );
+        assert_eq!(
+            SlashCommand::parse("/effort high"),
+            Ok(Some(SlashCommand::Effort {
+                level: Some("high".to_string()),
+            }))
+        );
+        assert_eq!(
+            SlashCommand::parse("/effort max"),
+            Ok(Some(SlashCommand::Effort {
+                level: Some("max".to_string()),
+            }))
+        );
+        assert_eq!(
+            SlashCommand::parse("/effort off"),
+            Ok(Some(SlashCommand::Effort {
+                level: Some("off".to_string()),
+            }))
+        );
+    }
+
+    #[test]
+    fn parses_effort_command_without_level() {
+        assert_eq!(
+            SlashCommand::parse("/effort"),
+            Ok(Some(SlashCommand::Effort { level: None }))
+        );
+    }
+
+    #[test]
+    fn think_command_slash_name() {
+        assert_eq!(
+            SlashCommand::Think {
+                mode: Some("on".to_string())
+            }
+            .slash_name(),
+            "/think"
+        );
+    }
+
+    #[test]
+    fn effort_command_slash_name() {
+        assert_eq!(
+            SlashCommand::Effort {
+                level: Some("high".to_string())
+            }
+            .slash_name(),
+            "/effort"
+        );
+    }
+
     #[test]
     fn parses_history_command_without_count() {
         // given
@@ -4706,7 +4815,7 @@ mod tests {
         assert!(help.contains("aliases: /skill"));
         assert!(!help.contains("/login"));
         assert!(!help.contains("/logout"));
-        assert_eq!(slash_command_specs().len(), 139);
+        assert_eq!(slash_command_specs().len(), 140);
         assert!(resume_supported_slash_commands().len() >= 39);
     }
 

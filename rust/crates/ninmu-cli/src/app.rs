@@ -691,6 +691,27 @@ impl LiveCli {
                 }
                 false
             }
+            SlashCommand::Think { mode } => {
+                match mode.as_deref() {
+                    Some("on") | Some("enable") => {
+                        self.set_thinking_mode(Some(true));
+                        println!("thinking mode enabled");
+                    }
+                    Some("off") | Some("disable") => {
+                        self.set_thinking_mode(Some(false));
+                        println!("thinking mode disabled");
+                    }
+                    Some("auto") | None => {
+                        self.set_thinking_mode(None);
+                        println!("thinking mode set to auto (model default)");
+                    }
+                    Some(other) => {
+                        println!("unknown thinking mode: {other}");
+                        println!("valid modes: on, off, auto");
+                    }
+                }
+                false
+            }
             SlashCommand::Login
             | SlashCommand::Logout
             | SlashCommand::Vim
@@ -2988,6 +3009,7 @@ fn run_tui_repl(cli: &mut LiveCli) -> Result<(), Box<dyn std::error::Error>> {
             Ok(Some(command)) => {
                 let is_resume = matches!(command, SlashCommand::Resume { .. });
                 let is_effort = matches!(command, SlashCommand::Effort { .. });
+                let is_think = matches!(command, SlashCommand::Think { .. });
                 let is_model = matches!(command, SlashCommand::Model { .. });
                 // Capture stdout+stderr so slash command output goes to
                 // scrollback instead of being written directly to the
@@ -3026,8 +3048,8 @@ fn run_tui_repl(cli: &mut LiveCli) -> Result<(), Box<dyn std::error::Error>> {
                 if is_resume {
                     bridge.load_history(cli.runtime.session().messages.clone());
                 }
-                // For /effort, sync reasoning state back to the TUI header.
-                if is_effort {
+                // For /effort and /think, sync reasoning state back to the TUI header.
+                if is_effort || is_think {
                     let effort = cli
                         .runtime
                         .runtime
