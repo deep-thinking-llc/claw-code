@@ -36,13 +36,12 @@ impl ProviderClient {
             if custom.api.as_str() == "anthropic-messages" {
                 let client = AnthropicClient::new(custom.api_key).with_base_url(custom.base_url);
                 return Ok(Self::Anthropic(client));
-            } else {
-                // Default: openai-completions wire format
-                let compat_config = OpenAiCompatConfig::openai();
-                let client = OpenAiCompatClient::new(custom.api_key, compat_config)
-                    .with_base_url(custom.base_url);
-                return Ok(Self::OpenAi(client));
             }
+            // Default: openai-completions wire format
+            let compat_config = OpenAiCompatConfig::openai();
+            let client = OpenAiCompatClient::new(custom.api_key, compat_config)
+                .with_base_url(custom.base_url);
+            return Ok(Self::OpenAi(client));
         }
 
         match providers::detect_provider_kind(&resolved_model) {

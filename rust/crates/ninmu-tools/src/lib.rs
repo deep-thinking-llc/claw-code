@@ -4845,6 +4845,7 @@ fn prompt_cache_record_to_runtime_event(
     })
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn final_assistant_text(summary: ninmu_runtime::TurnSummary) -> String {
     summary
         .assistant_messages

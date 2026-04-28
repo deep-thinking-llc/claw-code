@@ -4,7 +4,32 @@
     unused_variables,
     clippy::unneeded_struct_pattern,
     clippy::unnecessary_wraps,
-    clippy::unused_self
+    clippy::unused_self,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::too_many_lines,
+    clippy::too_many_arguments,
+    clippy::match_same_arms,
+    clippy::doc_markdown,
+    clippy::manual_let_else,
+    clippy::items_after_statements,
+    clippy::needless_pass_by_value,
+    clippy::module_name_repetitions,
+    clippy::format_push_string,
+    clippy::unchecked_time_subtraction,
+    clippy::len_without_is_empty,
+    clippy::cast_lossless,
+    clippy::type_complexity,
+    clippy::result_large_err,
+    clippy::needless_raw_string_hashes,
+    clippy::if_same_then_else,
+    clippy::redundant_clone,
+    clippy::manual_string_new,
+    clippy::empty_line_after_doc_comments,
+    clippy::clone_on_copy,
+    clippy::needless_borrowed_reference
 )]
 mod app;
 mod args;

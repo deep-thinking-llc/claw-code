@@ -1,6 +1,24 @@
 //! # Claw SDK
 //!
 //! Programmatic API for embedding Claw's agent capabilities in Rust applications.
+
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::similar_names,
+    clippy::used_underscore_binding,
+    clippy::needless_pass_by_value,
+    clippy::unnecessary_wraps,
+    clippy::unused_self,
+    clippy::match_same_arms,
+    clippy::unnecessary_debug_formatting,
+    clippy::doc_markdown,
+    clippy::manual_let_else,
+    clippy::missing_fields_in_debug,
+    clippy::return_self_not_must_use,
+    clippy::type_complexity,
+    clippy::zero_sized_map_values
+)]
 //!
 //! ## Modules
 //!

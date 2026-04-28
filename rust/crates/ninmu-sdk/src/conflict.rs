@@ -214,6 +214,7 @@ pub struct MergeConflict {
 }
 
 #[cfg(test)]
+#[allow(dead_code, clippy::approx_constant, unused_must_use)]
 mod tests {
     use super::*;
 

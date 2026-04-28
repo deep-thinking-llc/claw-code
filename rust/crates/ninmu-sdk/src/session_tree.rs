@@ -137,7 +137,7 @@ impl SessionTree {
 
         // Fork at root: create a new root sibling
         if let Some(pid) = &parent_id {
-            self.add_child(new_branch_id, pid, &role, label)?
+            self.add_child(new_branch_id, pid, &role, label)?;
         } else {
             // Forking the root creates a second root-like node.
             // We preserve the original root_id so the tree remains

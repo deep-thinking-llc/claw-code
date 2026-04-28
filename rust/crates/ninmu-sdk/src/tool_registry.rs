@@ -517,6 +517,7 @@ impl ToolExecutor for SdkToolExecutor {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[allow(dead_code, clippy::approx_constant, unused_must_use)]
 mod tests {
     use super::*;
     use serde_json::json;

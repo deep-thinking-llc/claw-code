@@ -1004,7 +1004,7 @@ mod tests {
                 diff_hunk: Some("+pub mod auth;".to_string()),
             }],
             risk: RiskLevel::High,
-            timestamp_ms: 1234567890,
+            timestamp_ms: 1_234_567_890,
         };
 
         let json = serde_json::to_string(&record).expect("serialize");
@@ -1019,7 +1019,7 @@ mod tests {
             decision: Decision::Approved,
             comment: Some("Looks good".to_string()),
             reviewer: "alice".to_string(),
-            timestamp_ms: 1234567890,
+            timestamp_ms: 1_234_567_890,
         };
 
         let json = serde_json::to_string(&decision).expect("serialize");

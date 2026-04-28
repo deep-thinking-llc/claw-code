@@ -244,7 +244,7 @@ impl AgentOrchestrator {
 
         self.next_task_id += 1;
         let task_id = format!("orch-task-{}", self.next_task_id);
-        task.id = task_id.clone();
+        task.id.clone_from(&task_id);
 
         let orchestrated = OrchestratedTask {
             task,
@@ -401,7 +401,7 @@ impl AgentOrchestrator {
         let task = self
             .tasks
             .get(task_id)
-            .ok_or_else(|| HashSet::from_iter(std::iter::once(task_id.to_string())))?;
+            .ok_or_else(|| std::iter::once(task_id.to_string()).collect::<HashSet<_>>())?;
         if task.state != TaskState::Running {
             let mut msg = HashSet::new();
             msg.insert(format!(

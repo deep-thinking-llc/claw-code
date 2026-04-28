@@ -2708,7 +2708,7 @@ impl ToolExecutor for CliToolExecutor {
                     timeline.with(|t| t.complete_tool(true, false, 0));
                 }
                 if let Some(ref bridge) = self.event_bridge {
-                    bridge.tool_result(tool_name, &error.to_string(), true);
+                    bridge.tool_result(tool_name, error.to_string(), true);
                 }
                 if self.emit_output {
                     let highlight =

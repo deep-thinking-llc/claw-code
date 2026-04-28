@@ -45,7 +45,7 @@ fn e2e_load_models_json_and_find_custom_model() {
                 "api": "openai-completions",
                 "apiKey": "ollama",
                 "models": [
-                    { "id": "llama3.1:8b", "contextWindow": 128000, "maxTokens": 32768 },
+                    { "id": "llama3.1:8b", "contextWindow": 128_000, "maxTokens": 32768 },
                     { "id": "qwen2.5-coder:7b", "contextWindow": 32768, "maxTokens": 8192 }
                 ]
             }
@@ -63,7 +63,7 @@ fn e2e_load_models_json_and_find_custom_model() {
     assert_eq!(found.model_id, "llama3.1:8b");
     assert_eq!(found.base_url, "http://localhost:11434/v1");
     assert_eq!(found.max_tokens, 32768);
-    assert_eq!(found.context_window, 128000);
+    assert_eq!(found.context_window, 128_000);
 
     let found2 =
         models_file::find_custom_model("qwen2.5-coder:7b").expect("should find by bare ID");

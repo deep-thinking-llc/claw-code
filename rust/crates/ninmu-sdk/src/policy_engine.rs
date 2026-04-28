@@ -127,6 +127,15 @@ impl PolicyEngine {
         engine.register_defaults();
         engine
     }
+}
+
+impl Default for PolicyEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PolicyEngine {
 
     fn register_defaults(&mut self) {
         // Read-only tools auto-approve
@@ -213,12 +222,12 @@ impl PolicyEngine {
             .iter()
             .filter(|p| p.enabled && p.kind == action.kind)
             .collect();
-        candidates.sort_by(|a, b| b.priority.cmp(&a.priority));
+        candidates.sort_by_key(|b| std::cmp::Reverse(b.priority));
 
         for policy in &candidates {
             if Self::matches_condition(&policy.condition, action) {
                 match &policy.action {
-                    PolicyDecision::Defer => continue,
+                    PolicyDecision::Defer => {}
                     decision => return decision.clone(),
                 }
             }

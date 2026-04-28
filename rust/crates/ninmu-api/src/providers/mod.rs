@@ -236,6 +236,7 @@ pub fn resolve_model_alias(model: &str) -> String {
 }
 
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn metadata_for_model(model: &str) -> Option<ProviderMetadata> {
     let canonical = resolve_model_alias(model);
 
@@ -426,13 +427,12 @@ pub fn detect_provider_kind(model: &str) -> ProviderKind {
 pub fn provider_kind_from_str(name: &str) -> Option<ProviderKind> {
     match name.to_ascii_lowercase().as_str() {
         "anthropic" => Some(ProviderKind::Anthropic),
-        "openai" => Some(ProviderKind::OpenAi),
+        "openai" | "dashscope" => Some(ProviderKind::OpenAi),
         "xai" | "grok" => Some(ProviderKind::Xai),
         "deepseek" => Some(ProviderKind::DeepSeek),
         "ollama" => Some(ProviderKind::Ollama),
         "qwen" => Some(ProviderKind::Qwen),
         "vllm" => Some(ProviderKind::Vllm),
-        "dashscope" => Some(ProviderKind::OpenAi),
         "mistral" => Some(ProviderKind::Mistral),
         "gemini" => Some(ProviderKind::Gemini),
         "cohere" => Some(ProviderKind::Cohere),
@@ -542,11 +542,7 @@ pub fn model_token_limit(model: &str) -> Option<ModelTokenLimit> {
         }),
         // Google Gemini models
         // Source: https://ai.google.dev/gemini-api/docs/models
-        "gemini-2.5-pro" => Some(ModelTokenLimit {
-            max_output_tokens: 65_536,
-            context_window_tokens: 1_048_576,
-        }),
-        "gemini-2.5-flash" | "gemini-2.5-flash-preview-05-20" => Some(ModelTokenLimit {
+        "gemini-2.5-pro" | "gemini-2.5-flash" | "gemini-2.5-flash-preview-05-20" => Some(ModelTokenLimit {
             max_output_tokens: 65_536,
             context_window_tokens: 1_048_576,
         }),
