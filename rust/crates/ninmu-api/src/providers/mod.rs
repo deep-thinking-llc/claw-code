@@ -1507,7 +1507,9 @@ NO_EQUALS_LINE
         let _lock = env_lock();
         let _ollama = EnvVarGuard::set("OLLAMA_BASE_URL", Some("http://localhost:11434/v1"));
         let _anthropic = EnvVarGuard::set("ANTHROPIC_API_KEY", None);
+        let _anthropic_token = EnvVarGuard::set("ANTHROPIC_AUTH_TOKEN", None);
         let _openai = EnvVarGuard::set("OPENAI_API_KEY", None);
+        let _openai_base = EnvVarGuard::set("OPENAI_BASE_URL", None);
         let _xai = EnvVarGuard::set("XAI_API_KEY", None);
         let _deepseek = EnvVarGuard::set("DEEPSEEK_API_KEY", None);
         let _qwen = EnvVarGuard::set("QWEN_API_KEY", None);
@@ -1527,7 +1529,9 @@ NO_EQUALS_LINE
         let _lock = env_lock();
         let _vllm = EnvVarGuard::set("VLLM_BASE_URL", Some("http://localhost:8000/v1"));
         let _anthropic = EnvVarGuard::set("ANTHROPIC_API_KEY", None);
+        let _anthropic_token = EnvVarGuard::set("ANTHROPIC_AUTH_TOKEN", None);
         let _openai = EnvVarGuard::set("OPENAI_API_KEY", None);
+        let _openai_base = EnvVarGuard::set("OPENAI_BASE_URL", None);
         let _xai = EnvVarGuard::set("XAI_API_KEY", None);
         let _ollama = EnvVarGuard::set("OLLAMA_BASE_URL", None);
         let _deepseek = EnvVarGuard::set("DEEPSEEK_API_KEY", None);

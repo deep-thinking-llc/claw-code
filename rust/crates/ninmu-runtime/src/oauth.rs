@@ -1,7 +1,9 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -81,6 +83,52 @@ pub struct OAuthCallbackParams {
     pub state: Option<String>,
     pub error: Option<String>,
     pub error_description: Option<String>,
+}
+
+/// Stored context for an in-flight OAuth authorization flow.
+#[derive(Debug, Clone)]
+pub struct PendingOAuthFlow {
+    pub state: String,
+    pub code_verifier: String,
+    pub redirect_uri: String,
+    pub created_at: Instant,
+}
+
+/// In-memory store for validating OAuth callbacks and preventing CSRF replay.
+#[derive(Debug)]
+pub struct OAuthFlowStore {
+    pub flows: Arc<Mutex<HashMap<String, PendingOAuthFlow>>>,
+    pub max_age: Duration,
+}
+
+impl OAuthFlowStore {
+    pub fn new(max_age: Duration) -> Self {
+        Self {
+            flows: Arc::new(Mutex::new(HashMap::new())),
+            max_age,
+        }
+    }
+
+    pub fn register(&self, flow: PendingOAuthFlow) {
+        let mut flows = self.flows.lock().expect("flows lock");
+        flows.insert(flow.state.clone(), flow);
+    }
+
+    pub fn validate_and_remove(&self, state: &str) -> Result<PendingOAuthFlow, String> {
+        let mut flows = self.flows.lock().expect("flows lock");
+        let flow = flows
+            .remove(state)
+            .ok_or_else(|| "state not found or already consumed".to_string())?;
+        if flow.created_at.elapsed() > self.max_age {
+            return Err("state expired".to_string());
+        }
+        Ok(flow)
+    }
+
+    pub fn sweep_expired(&self) {
+        let mut flows = self.flows.lock().expect("flows lock");
+        flows.retain(|_, flow| flow.created_at.elapsed() <= self.max_age);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -298,7 +346,26 @@ pub fn clear_oauth_credentials() -> io::Result<()> {
     write_credentials_root(&path, &root)
 }
 
-pub fn parse_oauth_callback_request_target(target: &str) -> Result<OAuthCallbackParams, String> {
+pub fn parse_oauth_callback_request_target(
+    target: &str,
+    store: &OAuthFlowStore,
+) -> Result<OAuthCallbackParams, String> {
+    let (path, query) = target
+        .split_once('?')
+        .map_or((target, ""), |(path, query)| (path, query));
+    if path != "/callback" {
+        return Err(format!("unexpected callback path: {path}"));
+    }
+    let params = parse_oauth_callback_query(query)?;
+    let state = params.state.as_ref().ok_or("missing state parameter")?;
+    let _flow = store.validate_and_remove(state)?;
+    Ok(params)
+}
+
+/// Parse callback target without state validation (for legacy/testing use only).
+pub fn parse_oauth_callback_request_target_unvalidated(
+    target: &str,
+) -> Result<OAuthCallbackParams, String> {
     let (path, query) = target
         .split_once('?')
         .map_or((target, ""), |(path, query)| (path, query));
@@ -326,7 +393,8 @@ pub fn parse_oauth_callback_query(query: &str) -> Result<OAuthCallbackParams, St
 
 fn generate_random_token(bytes: usize) -> io::Result<String> {
     let mut buffer = vec![0_u8; bytes];
-    File::open("/dev/urandom")?.read_exact(&mut buffer)?;
+    getrandom::getrandom(&mut buffer)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
     Ok(base64url_encode(&buffer))
 }
 
@@ -371,11 +439,21 @@ fn read_credentials_root(path: &PathBuf) -> io::Result<Map<String, Value>> {
 fn write_credentials_root(path: &PathBuf, root: &Map<String, Value>) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+        }
     }
     let rendered = serde_json::to_string_pretty(&Value::Object(root.clone()))
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     let temp_path = path.with_extension("json.tmp");
     fs::write(&temp_path, format!("{rendered}\n"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o600))?;
+    }
     fs::rename(temp_path, path)
 }
 
@@ -411,53 +489,16 @@ fn base64url_encode(bytes: &[u8]) -> String {
 }
 
 fn percent_encode(value: &str) -> String {
-    let mut encoded = String::new();
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                encoded.push(char::from(byte));
-            }
-            _ => {
-                use std::fmt::Write as _;
-                let _ = write!(&mut encoded, "%{byte:02X}");
-            }
-        }
-    }
-    encoded
+    percent_encoding::percent_encode(value.as_bytes(), percent_encoding::NON_ALPHANUMERIC)
+        .to_string()
 }
 
 fn percent_decode(value: &str) -> Result<String, String> {
-    let mut decoded = Vec::with_capacity(value.len());
-    let bytes = value.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        match bytes[index] {
-            b'%' if index + 2 < bytes.len() => {
-                let hi = decode_hex(bytes[index + 1])?;
-                let lo = decode_hex(bytes[index + 2])?;
-                decoded.push((hi << 4) | lo);
-                index += 3;
-            }
-            b'+' => {
-                decoded.push(b' ');
-                index += 1;
-            }
-            byte => {
-                decoded.push(byte);
-                index += 1;
-            }
-        }
-    }
-    String::from_utf8(decoded).map_err(|error| error.to_string())
-}
-
-fn decode_hex(byte: u8) -> Result<u8, String> {
-    match byte {
-        b'0'..=b'9' => Ok(byte - b'0'),
-        b'a'..=b'f' => Ok(byte - b'a' + 10),
-        b'A'..=b'F' => Ok(byte - b'A' + 10),
-        _ => Err(format!("invalid percent byte: {byte}")),
-    }
+    let normalized = value.replace('+', " ");
+    percent_encoding::percent_decode_str(&normalized)
+        .decode_utf8()
+        .map_err(|e| format!("invalid percent encoding: {e}"))
+        .map(|s| s.to_string())
 }
 
 #[cfg(test)]

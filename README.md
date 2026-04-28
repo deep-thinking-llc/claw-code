@@ -44,8 +44,8 @@ Ninmu Code is an **autonomous coding harness** — a system where AI agents exec
 │  prompt · session · doctor · status · mcp · tools        │
 ├─────────────────────────────────────────────────────────┤
 │              Provider Layer (models.json)                 │
-│  Anthropic · OpenAI · xAI · DeepSeek · DashScope · custom │
-│  Ollama · vLLM · Qwen (external) · models.json           │
+│  Anthropic · OpenAI · xAI · DeepSeek · Mistral · Gemini  │
+│  Cohere · DashScope · Ollama · vLLM · Qwen · custom      │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -54,8 +54,8 @@ Ninmu Code is an **autonomous coding harness** — a system where AI agents exec
 ### Build from source
 
 ```bash
-git clone https://github.com/deep-thinking-llc/claw-code
-cd claw-code/rust
+git clone https://github.com/deep-thinking-llc/ninmu-code
+cd ninmu-code/rust
 cargo build --workspace
 ```
 
@@ -106,13 +106,13 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-sdk = { path = "../ninmu-code/rust/crates/sdk" }
-runtime = { path = "../ninmu-code/rust/crates/runtime" }
+ninmu-sdk = { path = "../rust/crates/ninmu-sdk" }
+ninmu-runtime = { path = "../rust/crates/ninmu-runtime" }
 ```
 
 ```rust
-use sdk::{AgentSession, ToolRegistry, EventBus};
-use runtime::PermissionMode;
+use ninmu_sdk::{AgentSession, ToolRegistry, EventBus};
+use ninmu_runtime::PermissionMode;
 
 let (mut session, event_bus) = AgentSession::new(
     "claude-sonnet-4-6",
@@ -166,12 +166,15 @@ Ninmu Code ships with native routing for these providers. Prefix your model name
 | **OpenAI** | `OPENAI_API_KEY` | `OPENAI_BASE_URL` | `openai/*`, `gpt-*` |
 | **xAI (Grok)** | `XAI_API_KEY` | `XAI_BASE_URL` | `grok-*`, aliases: `grok`, `grok-mini`, `grok-2` |
 | **DeepSeek** | `DEEPSEEK_API_KEY` | `DEEPSEEK_BASE_URL` | `deepseek-chat`, `deepseek-reasoner`, alias: `deepseek-r1` |
+| **Mistral** | `MISTRAL_API_KEY` | `MISTRAL_BASE_URL` | `mistral-*`, `codestral-*` |
+| **Google Gemini** | `GEMINI_API_KEY` | `GEMINI_BASE_URL` | `gemini-*` |
+| **Cohere** | `COHERE_API_KEY` | `COHERE_BASE_URL` | `command-*`, `rerank-*` |
 | **DashScope** (Alibaba) | `DASHSCOPE_API_KEY` | `DASHSCOPE_BASE_URL` | `qwen-*` (bare), `kimi-*`, `kimi` |
 | **Ollama** (local/cloud) | `OLLAMA_API_KEY` (optional) | `OLLAMA_BASE_URL` | `ollama/*` |
 | **vLLM** (local) | none | `VLLM_BASE_URL` | `vllm/*` |
 | **Qwen** (external) | `QWEN_API_KEY` | `QWEN_BASE_URL` | `qwen/*` |
 
-**Provider auto-detection order:** when the model name doesn't match a built-in prefix, the system checks environment variables in this order: model prefix → custom models.json → Anthropic auth → OpenAI auth → xAI auth → DeepSeek auth → Qwen auth → `OLLAMA_BASE_URL` → `VLLM_BASE_URL` → `OPENAI_BASE_URL` → Anthropic fallback.
+**Provider auto-detection order:** when the model name doesn't match a built-in prefix, the system checks environment variables in this order: model prefix → custom models.json → Anthropic auth → OpenAI auth → xAI auth → DeepSeek auth → Mistral auth → Gemini auth → Cohere auth → Qwen auth → `OLLAMA_BASE_URL` → `VLLM_BASE_URL` → `OPENAI_BASE_URL` → Anthropic fallback.
 
 **Examples:**
 
@@ -284,9 +287,9 @@ MIT License. See [LICENSE](./LICENSE) for the full text.
 
 Ninmu Code was originally forked from [claw-code](https://github.com/ultraworkers/claw-code) by [UltraWorkers](https://github.com/ultraworkers). The upstream project is an autonomous coding harness designed for machine-first orchestration of AI coding agents.
 
-### How Ninmu Code differs from claw-code
+### How Ninmu Code differs from the original claw-code
 
-While claw-code continues as a standalone autonomous coding harness focused on agent orchestration, Ninmu Code has diverged with different priorities:
+While the original claw-code continues as a standalone autonomous coding harness focused on agent orchestration, Ninmu Code has diverged with different priorities:
 
 - **Simplified architecture** — removed compatibility layers and upstream tracking infrastructure in favor of a lean, self-contained codebase
 - **Different CLI identity** — the `ninmu` CLI binary and `Ninmu Code` branding distinguish it from the upstream `claw` command
