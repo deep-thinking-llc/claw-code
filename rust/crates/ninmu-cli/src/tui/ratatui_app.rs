@@ -109,6 +109,10 @@ pub struct RatatuiApp {
     reasoning_effort: Option<String>,
     /// Whether thinking mode is enabled (None = auto).
     thinking_mode: Option<bool>,
+    /// When we last received a TuiEvent from the worker thread. Used to
+    /// detect stalled turns where the worker is stuck (e.g. dead SSE
+    /// connection or blocked tool) and force-cancel them.
+    last_event_received: Option<Instant>,
 }
 
 /// A permission prompt waiting for the user to respond in the TUI.
@@ -149,6 +153,7 @@ impl RatatuiApp {
             cached_elapsed_str: String::new(),
             reasoning_effort: None,
             thinking_mode: None,
+            last_event_received: None,
         };
         app.cached_header = Self::build_header_line(
             &app.model,
