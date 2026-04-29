@@ -70,6 +70,7 @@ pub struct AgentSessionBuilder {
     tools: ToolRegistry,
     permission_mode: PermissionMode,
     api_client: Option<BoxedApiClient>,
+    existing_session: Option<Session>,
 }
 
 impl AgentSessionBuilder {
@@ -82,6 +83,7 @@ impl AgentSessionBuilder {
             tools: ToolRegistry::new(),
             permission_mode: PermissionMode::DangerFullAccess,
             api_client: None,
+            existing_session: None,
         }
     }
 
@@ -120,11 +122,20 @@ impl AgentSessionBuilder {
         self
     }
 
+    /// Use an existing session instead of creating a new one.
+    ///
+    /// This is useful for resuming a persisted session.
+    #[must_use]
+    pub fn session(mut self, session: Session) -> Self {
+        self.existing_session = Some(session);
+        self
+    }
+
     /// Build the `AgentSession`.
     ///
     /// Returns the session and an event bus for subscribing to events.
     pub fn build(self) -> Result<(AgentSession, EventBus), String> {
-        let session = Session::new();
+        let session = self.existing_session.unwrap_or_default();
         let mut event_bus = EventBus::new();
         let tool_executor = SdkToolExecutor::new(&self.tools);
 
@@ -496,6 +507,23 @@ mod tests {
             .expect("builder should create session");
 
         assert_eq!(session.model(), "gpt-4o");
+    }
+
+    #[test]
+    fn builder_uses_existing_session() {
+        let mut existing = Session::new();
+        existing.push_user_text("existing message").unwrap();
+        let existing_id = existing.session_id.clone();
+
+        let (session, _bus) = AgentSessionBuilder::new()
+            .model("claude-sonnet-4-6")
+            .permission_mode(PermissionMode::DangerFullAccess)
+            .session(existing)
+            .build()
+            .expect("builder should create session from existing");
+
+        assert_eq!(session.session_id(), existing_id);
+        assert_eq!(session.session().messages.len(), 1);
     }
 
     #[test]

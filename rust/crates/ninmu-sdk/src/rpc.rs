@@ -13,6 +13,7 @@ use crate::session::{AgentSession, AgentSessionBuilder, BoxedApiClient};
 use crate::tool_registry::ToolRegistry;
 use crate::EventBus;
 use crate::SessionTree;
+use ninmu_runtime::Session;
 
 // ---------------------------------------------------------------------------
 // JSON-RPC types
@@ -148,6 +149,7 @@ impl<R: BufRead, W: Write> RpcServer<R, W> {
                 Ok(serde_json::json!({"status": "shutting_down"}))
             }
             "session.create" => self.handle_session_create(&params),
+            "session.resume" => self.handle_session_resume(&params),
             "session.turn" => self.handle_session_turn(&params),
             "session.list" => self.handle_session_list(),
             "session.destroy" => self.handle_session_destroy(&params),
@@ -172,6 +174,28 @@ impl<R: BufRead, W: Write> RpcServer<R, W> {
         Ok(serde_json::json!({"status": "ok", "version": env!("CARGO_PKG_VERSION")}))
     }
 
+    fn build_session(
+        &self,
+        model: &str,
+        system_prompt: Vec<String>,
+        existing_session: Option<Session>,
+    ) -> Result<(AgentSession, EventBus), String> {
+        let mut builder = AgentSessionBuilder::new()
+            .model(model)
+            .tools(ToolRegistry::new())
+            .permission_mode(ninmu_runtime::PermissionMode::DangerFullAccess);
+        for line in &system_prompt {
+            builder = builder.system_prompt(line.as_str());
+        }
+        if let Some(session) = existing_session {
+            builder = builder.session(session);
+        }
+        if let Some(ref factory) = self.client_factory {
+            builder = builder.api_client(factory());
+        }
+        builder.build()
+    }
+
     fn handle_session_create(&mut self, params: &Value) -> Result<Value, String> {
         let model = params
             .get("model")
@@ -187,25 +211,7 @@ impl<R: BufRead, W: Write> RpcServer<R, W> {
             })
             .unwrap_or_default();
 
-        let (session, event_bus) = if let Some(ref factory) = self.client_factory {
-            let mut builder = AgentSessionBuilder::new()
-                .model(model)
-                .tools(ToolRegistry::new())
-                .permission_mode(ninmu_runtime::PermissionMode::DangerFullAccess)
-                .api_client(factory());
-            for line in &system_prompt {
-                let line: &String = line;
-                builder = builder.system_prompt(line.as_str());
-            }
-            builder.build()?
-        } else {
-            AgentSession::new(
-                model,
-                system_prompt,
-                ToolRegistry::new(),
-                ninmu_runtime::PermissionMode::DangerFullAccess,
-            )?
-        };
+        let (session, event_bus) = self.build_session(model, system_prompt, None)?;
 
         let session_id = session.session_id().to_string();
 
@@ -223,6 +229,48 @@ impl<R: BufRead, W: Write> RpcServer<R, W> {
         Ok(serde_json::json!({
             "sessionId": session_id,
             "model": model,
+        }))
+    }
+
+    fn handle_session_resume(&mut self, params: &Value) -> Result<Value, String> {
+        let path = params
+            .get("path")
+            .and_then(|v| v.as_str())
+            .ok_or("missing path")?;
+        let model = params
+            .get("model")
+            .and_then(|v| v.as_str())
+            .unwrap_or("claude-sonnet-4-6");
+        let system_prompt = params
+            .get("system_prompt")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let loaded = Session::load_from_path(path)
+            .map_err(|e| format!("failed to load session from {path}: {e}"))?;
+        let session_id = loaded.session_id.clone();
+
+        let (session, event_bus) = self.build_session(model, system_prompt, Some(loaded))?;
+
+        let mut tree = SessionTree::new();
+        tree.set_root(&session_id, "system", None);
+
+        let managed = ManagedSession {
+            session,
+            tree,
+            event_bus,
+        };
+        self.sessions.insert(session_id.clone(), managed);
+
+        Ok(serde_json::json!({
+            "sessionId": session_id,
+            "model": model,
+            "status": "resumed",
         }))
     }
 
@@ -646,5 +694,52 @@ mod tests {
         assert!(resp.id.is_none());
         let error = resp.error.expect("should have error");
         assert_eq!(error.code, -32700);
+    }
+
+    #[test]
+    fn session_resume_loads_persisted_session() {
+        // Create a temporary session file
+        let temp_dir = std::env::temp_dir();
+        let session_path = temp_dir.join(format!(
+            "rpc-resume-test-{}.jsonl",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        let mut session = Session::new();
+        session.push_user_text("hello from persisted session").unwrap();
+        session.save_to_path(&session_path).unwrap();
+
+        let input = format!(
+            "{{\"jsonrpc\":\"2.0\",\"method\":\"session.resume\",\"params\":{{\"path\":\"{}\",\"model\":\"claude-sonnet-4-6\"}},\"id\":1}}\n",
+            session_path.display().to_string().replace('\\', "\\\\")
+        );
+        let reader = Cursor::new(input.as_bytes());
+        let mut output = Cursor::new(Vec::new());
+
+        let session_id = {
+            let mut server = RpcServer::new(reader, &mut output, None);
+            server.run().expect("server should run");
+
+            // Verify the session is registered
+            assert_eq!(server.sessions.len(), 1);
+            let sid = server.sessions.keys().next().unwrap().clone();
+            let managed = server.sessions.get(&sid).unwrap();
+            assert_eq!(managed.session.session().messages.len(), 1);
+            sid
+        };
+
+        let output_str = String::from_utf8(output.into_inner()).expect("valid utf8");
+        let resp: JsonRpcResponse =
+            serde_json::from_str(output_str.trim()).expect("response should parse");
+        assert_eq!(resp.id, Some(1));
+        let result = resp.result.expect("should have result");
+        assert_eq!(result["status"], "resumed");
+        assert!(!session_id.is_empty());
+
+        // Cleanup
+        let _ = std::fs::remove_file(&session_path);
     }
 }
