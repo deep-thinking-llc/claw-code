@@ -256,7 +256,7 @@ impl SetupReport {
         } else {
             " (after setting ANTHROPIC_API_KEY)"
         };
-        format!("claw prompt \"Summarize this repository\"{provider_hint}")
+        format!("ninmu prompt \"Summarize this repository\"{provider_hint}")
     }
 }
 
