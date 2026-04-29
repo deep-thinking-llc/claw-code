@@ -155,8 +155,10 @@ impl PromptCache {
         let entry_path = inner.paths.completion_entry_path(&request_hash);
         let ttl = inner.config.completion_ttl;
 
-        lock_exclusive_with_timeout(&*self.lock_file, Duration::from_secs(5));
-        let _guard = FileLockGuard { file: &*self.lock_file };
+        lock_exclusive_with_timeout(&self.lock_file, Duration::from_secs(5));
+        let _guard = FileLockGuard {
+            file: &self.lock_file,
+        };
 
         let entry = read_json::<CompletionCacheEntry>(&entry_path);
         let Some(entry) = entry else {
@@ -237,8 +239,10 @@ impl PromptCache {
 
         inner.previous = Some(current);
 
-        lock_exclusive_with_timeout(&*self.lock_file, Duration::from_secs(5));
-        let _guard = FileLockGuard { file: &*self.lock_file };
+        lock_exclusive_with_timeout(&self.lock_file, Duration::from_secs(5));
+        let _guard = FileLockGuard {
+            file: &self.lock_file,
+        };
 
         if let Some(response) = response {
             write_completion_entry(&inner.paths, &request_hash, response);
@@ -478,6 +482,7 @@ fn create_lock_file(path: &Path) -> std::fs::File {
     let _ = fs::create_dir_all(path.parent().unwrap_or(path));
     std::fs::OpenOptions::new()
         .create(true)
+        .truncate(false)
         .write(true)
         .open(path)
         .expect("prompt-cache lock file should be creatable")
@@ -787,6 +792,126 @@ mod tests {
         let second = request_hash_hex(&request);
         assert_eq!(first, second);
         assert!(first.starts_with(REQUEST_FINGERPRINT_PREFIX));
+    }
+
+    #[test]
+    fn concurrent_writers_to_same_session_do_not_corrupt() {
+        let _guard = test_env_lock();
+        let temp_root = std::env::temp_dir().join(format!(
+            "prompt-cache-concurrent-write-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        std::env::set_var("CLAUDE_CONFIG_HOME", &temp_root);
+
+        let session_id = "concurrent-write-session";
+        let request = sample_request("concurrent");
+        let response = sample_response(100, 10, "ok");
+
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let req = request.clone();
+                let resp = response.clone();
+                let sid = session_id.to_string();
+                std::thread::spawn(move || {
+                    let cache = PromptCache::new(&sid);
+                    for _ in 0..25 {
+                        let _ = cache.record_response(&req, &resp);
+                    }
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().expect("thread should finish");
+        }
+
+        // Verify no files are corrupted (all JSON should be parseable).
+        let cache = PromptCache::new(session_id);
+        let paths = cache.paths();
+        let stats = read_json::<super::PromptCacheStats>(&paths.stats_path);
+        assert!(
+            stats.is_some(),
+            "stats file should be valid JSON after concurrent writes"
+        );
+        let prev_state = read_json::<super::TrackedPromptState>(&paths.session_state_path);
+        assert!(
+            prev_state.is_some(),
+            "session-state file should be valid JSON after concurrent writes"
+        );
+        // Because each instance caches its own in-memory stats, the on-disk
+        // counter is best-effort — just verify it is not zero.
+        assert!(stats.unwrap().completion_cache_writes > 0);
+
+        std::fs::remove_dir_all(temp_root).expect("cleanup temp root");
+        std::env::remove_var("CLAUDE_CONFIG_HOME");
+    }
+
+    #[test]
+    fn concurrent_readers_and_writers_remain_consistent() {
+        let _guard = test_env_lock();
+        let temp_root = std::env::temp_dir().join(format!(
+            "prompt-cache-concurrent-rw-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        std::env::set_var("CLAUDE_CONFIG_HOME", &temp_root);
+
+        let session_id = "concurrent-rw-session";
+        let request = sample_request("rw");
+        let response = sample_response(50, 5, "ok");
+
+        // Pre-populate the cache.
+        let init_cache = PromptCache::new(session_id);
+        let _ = init_cache.record_response(&request, &response);
+
+        let writer = {
+            let req = request.clone();
+            let resp = response.clone();
+            let sid = session_id.to_string();
+            std::thread::spawn(move || {
+                let cache = PromptCache::new(&sid);
+                for _ in 0..50 {
+                    let _ = cache.record_response(&req, &resp);
+                }
+            })
+        };
+
+        let reader = {
+            let req = request.clone();
+            let sid = session_id.to_string();
+            std::thread::spawn(move || {
+                let cache = PromptCache::new(&sid);
+                for _ in 0..50 {
+                    let _ = cache.lookup_completion(&req);
+                }
+            })
+        };
+
+        writer.join().expect("writer should finish");
+        reader.join().expect("reader should finish");
+
+        // Verify the cache entry is still readable and files are not corrupted.
+        let cache = PromptCache::new(session_id);
+        let lookup = cache.lookup_completion(&request);
+        assert!(
+            lookup.is_some(),
+            "cache entry should still be readable after concurrent access"
+        );
+        let paths = cache.paths();
+        assert!(
+            read_json::<super::PromptCacheStats>(&paths.stats_path).is_some(),
+            "stats file should remain valid JSON"
+        );
+
+        std::fs::remove_dir_all(temp_root).expect("cleanup temp root");
+        std::env::remove_var("CLAUDE_CONFIG_HOME");
     }
 
     fn sample_request(text: &str) -> MessageRequest {

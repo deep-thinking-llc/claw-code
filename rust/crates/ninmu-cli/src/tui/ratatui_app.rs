@@ -235,7 +235,17 @@ impl RatatuiApp {
 
     /// Open the interactive model selector dialog.
     pub fn open_model_selector(&mut self) {
+        // Trigger a background refresh of models.dev cache so providers
+        // with API keys show up-to-date models.
+        ninmu_api::models_dev::refresh_models_async();
+
         let entries = ninmu_api::list_available_models();
+
+        // Collapse providers without auth: keep only one entry per provider
+        // (the first model encountered) so the list isn't cluttered with
+        // models the user can't actually use.
+        let entries = Self::collapse_no_auth_providers(entries);
+
         let filtered: Vec<usize> = (0..entries.len()).collect();
         self.model_selector = Some(ModelSelector {
             all_entries: entries,
@@ -247,6 +257,30 @@ impl RatatuiApp {
             max_visible: 12,
         });
         self.dirty = true;
+    }
+
+    /// For providers without auth, keep only one representative entry per
+    /// provider.  This prevents the model list from being cluttered with
+    /// dozens of models the user can't use without an API key.
+    fn collapse_no_auth_providers(
+        entries: Vec<ninmu_api::ModelEntry>,
+    ) -> Vec<ninmu_api::ModelEntry> {
+        use std::collections::HashSet;
+        let mut result = Vec::new();
+        let mut seen_no_auth: HashSet<ninmu_api::ProviderKind> = HashSet::new();
+
+        for entry in entries {
+            if entry.has_auth {
+                // Keep all models for providers with auth.
+                result.push(entry);
+            } else if seen_no_auth.insert(entry.provider) {
+                // First model for this no-auth provider — keep it as a
+                // placeholder so the user knows the provider exists.
+                result.push(entry);
+            }
+            // Subsequent models for the same no-auth provider are dropped.
+        }
+        result
     }
 
     /// Take the selected model (if any) — returns `Some(model_name)` once.
@@ -1605,7 +1639,11 @@ impl RatatuiApp {
                 Style::default().fg(MUTED)
             };
 
-            let label = if entry.alias == entry.canonical {
+            let label = if no_auth {
+                // For collapsed no-auth providers, show the provider name
+                // instead of a specific model name.
+                format!("[{prov}]")
+            } else if entry.alias == entry.canonical {
                 entry.canonical.clone()
             } else {
                 format!("{} → {}", entry.alias, entry.canonical)
@@ -2781,6 +2819,55 @@ mod tests {
         assert!(app.model_selector.is_none());
     }
 
+    #[test]
+    fn collapse_no_auth_providers_groups_by_provider() {
+        use ninmu_api::{ModelEntry, ProviderKind};
+
+        let entries = vec![
+            ModelEntry {
+                alias: "gpt-4o".into(),
+                canonical: "gpt-4o".into(),
+                provider: ProviderKind::OpenAi,
+                has_auth: true,
+            },
+            ModelEntry {
+                alias: "gpt-4-turbo".into(),
+                canonical: "gpt-4-turbo".into(),
+                provider: ProviderKind::OpenAi,
+                has_auth: true,
+            },
+            ModelEntry {
+                alias: "claude-sonnet".into(),
+                canonical: "claude-sonnet".into(),
+                provider: ProviderKind::Anthropic,
+                has_auth: false,
+            },
+            ModelEntry {
+                alias: "claude-haiku".into(),
+                canonical: "claude-haiku".into(),
+                provider: ProviderKind::Anthropic,
+                has_auth: false,
+            },
+            ModelEntry {
+                alias: "deepseek-chat".into(),
+                canonical: "deepseek-chat".into(),
+                provider: ProviderKind::DeepSeek,
+                has_auth: false,
+            },
+        ];
+
+        let collapsed = RatatuiApp::collapse_no_auth_providers(entries);
+
+        // OpenAI has auth — both models kept.
+        assert_eq!(collapsed.iter().filter(|e| e.provider == ProviderKind::OpenAi).count(), 2);
+        // Anthropic has no auth — only one entry kept.
+        assert_eq!(collapsed.iter().filter(|e| e.provider == ProviderKind::Anthropic).count(), 1);
+        // DeepSeek has no auth — only one entry kept.
+        assert_eq!(collapsed.iter().filter(|e| e.provider == ProviderKind::DeepSeek).count(), 1);
+        // Total: 2 + 1 + 1 = 4
+        assert_eq!(collapsed.len(), 4);
+    }
+
     // -- Stall watchdog tests ----------------------------------------------
 
     #[test]
@@ -2985,14 +3072,23 @@ mod tests {
         // Frame 0: preview (first 30 chars) + remaining 170 chars + pacman.
         app.paste_anim_frame = 0;
         let display = app.paste_display_text();
-        assert!(display.starts_with(&"a".repeat(30)), "starts with 30-char preview");
+        assert!(
+            display.starts_with(&"a".repeat(30)),
+            "starts with 30-char preview"
+        );
         assert!(display.chars().any(RatatuiApp::is_pacman), "pacman present");
 
         // Frame 5: pacman has eaten ~half the excess, summary partially revealed.
         app.paste_anim_frame = 5;
         let display_mid = app.paste_display_text();
-        assert!(display_mid.chars().any(RatatuiApp::is_pacman), "pacman still present");
-        assert!(display_mid.contains("[Pasted"), "summary beginning to appear");
+        assert!(
+            display_mid.chars().any(RatatuiApp::is_pacman),
+            "pacman still present"
+        );
+        assert!(
+            display_mid.contains("[Pasted"),
+            "summary beginning to appear"
+        );
     }
 
     #[test]
@@ -3303,7 +3399,10 @@ mod tests {
         // During animation — shows preview (first 30 chars) + pacman.
         app.paste_anim_frame = 3;
         let display = app.paste_display_text();
-        assert!(display.chars().any(RatatuiApp::is_pacman), "pacman visible during animation");
+        assert!(
+            display.chars().any(RatatuiApp::is_pacman),
+            "pacman visible during animation"
+        );
 
         // After animation — shows summary only, never raw text.
         app.paste_animating = false;
