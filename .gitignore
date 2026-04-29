@@ -23,3 +23,4 @@ DESIGN.md
 # macOS
 .DS_Store
 .git.backup*
+.claw/
