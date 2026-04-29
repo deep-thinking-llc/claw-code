@@ -2,8 +2,6 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
 
 use crate::config::{ConfigError, ConfigLoader, RuntimeConfig};
 use crate::git_context::GitContext;
@@ -46,14 +44,14 @@ const MAX_INSTRUCTION_FILE_CHARS: usize = 4_000;
 const MAX_TOTAL_INSTRUCTION_CHARS: usize = 12_000;
 
 /// Contents of an instruction file included in prompt construction.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ContextFile {
     pub path: PathBuf,
     pub content: String,
 }
 
 /// Project-local context injected into the rendered system prompt.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProjectContext {
     pub cwd: PathBuf,
     pub current_date: String,
@@ -430,55 +428,16 @@ fn collapse_blank_lines(content: &str) -> String {
     result
 }
 
-/// Cache entry for a discovered project context.
-#[derive(Debug, Clone)]
-struct CachedProjectContext {
-    context: ProjectContext,
-    cached_at: Instant,
-}
-
-/// TTL for cached git context. Git state rarely changes within a single
-/// session turn, so a 5-second cache eliminates redundant subprocess calls.
-const GIT_CONTEXT_CACHE_TTL: Duration = Duration::from_secs(5);
-
-/// Global cache for system prompt project context, keyed by cwd + date.
-static PROJECT_CONTEXT_CACHE: OnceLock<
-    Mutex<std::collections::HashMap<String, CachedProjectContext>>,
-> = OnceLock::new();
-
-fn project_context_cache() -> &'static Mutex<std::collections::HashMap<String, CachedProjectContext>>
-{
-    PROJECT_CONTEXT_CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
-}
-
 /// Load project context with caching. Git status/diff are expensive
-/// (subprocess calls), so we cache them for a short TTL.
+/// (subprocess calls), so we cache them on disk (with mtime-based
+/// invalidation) so the cache survives process restarts.
 fn load_project_context_cached(cwd: &Path, current_date: &str) -> std::io::Result<ProjectContext> {
-    let cache_key = format!("{}:{}", cwd.display(), current_date);
-    let now = Instant::now();
-
-    {
-        let cache = project_context_cache()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(entry) = cache.get(&cache_key) {
-            if now.duration_since(entry.cached_at) < GIT_CONTEXT_CACHE_TTL {
-                return Ok(entry.context.clone());
-            }
-        }
+    if let Some(context) = crate::project_context_cache::load(cwd, current_date) {
+        return Ok(context);
     }
 
     let context = ProjectContext::discover_with_git(cwd, current_date)?;
-    let mut cache = project_context_cache()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    cache.insert(
-        cache_key,
-        CachedProjectContext {
-            context: context.clone(),
-            cached_at: now,
-        },
-    );
+    let _ = crate::project_context_cache::save(cwd, &context);
     Ok(context)
 }
 
@@ -608,12 +567,12 @@ mod tests {
     fn discovers_instruction_files_from_ancestor_chain() {
         let root = temp_dir();
         let nested = root.join("apps").join("api");
-        fs::create_dir_all(nested.join(".ninmu")).expect("nested claw dir");
+        fs::create_dir_all(nested.join(".ninmu")).expect("nested ninmu dir");
         fs::write(root.join("CLAUDE.md"), "root instructions").expect("write root instructions");
         fs::write(root.join("CLAUDE.local.md"), "local instructions")
             .expect("write local instructions");
         fs::create_dir_all(root.join("apps")).expect("apps dir");
-        fs::create_dir_all(root.join("apps").join(".ninmu")).expect("apps claw dir");
+        fs::create_dir_all(root.join("apps").join(".ninmu")).expect("apps ninmu dir");
         fs::write(root.join("apps").join("CLAUDE.md"), "apps instructions")
             .expect("write apps instructions");
         fs::write(
@@ -844,7 +803,7 @@ mod tests {
     #[test]
     fn load_system_prompt_reads_claude_files_and_config() {
         let root = temp_dir();
-        fs::create_dir_all(root.join(".ninmu")).expect("claw dir");
+        fs::create_dir_all(root.join(".ninmu")).expect("ninmu dir");
         fs::write(root.join("CLAUDE.md"), "Project rules").expect("write instructions");
         fs::write(
             root.join(".ninmu").join("settings.json"),
@@ -887,7 +846,7 @@ mod tests {
     #[test]
     fn renders_claude_code_style_sections_with_project_context() {
         let root = temp_dir();
-        fs::create_dir_all(root.join(".ninmu")).expect("claw dir");
+        fs::create_dir_all(root.join(".ninmu")).expect("ninmu dir");
         fs::write(root.join("CLAUDE.md"), "Project rules").expect("write CLAUDE.md");
         fs::write(
             root.join(".ninmu").join("settings.json"),
@@ -929,7 +888,7 @@ mod tests {
     fn discovers_dot_claude_instructions_markdown() {
         let root = temp_dir();
         let nested = root.join("apps").join("api");
-        fs::create_dir_all(nested.join(".ninmu")).expect("nested claw dir");
+        fs::create_dir_all(nested.join(".ninmu")).expect("nested ninmu dir");
         fs::write(
             nested.join(".ninmu").join("instructions.md"),
             "instruction markdown",

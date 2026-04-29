@@ -2,14 +2,14 @@ use std::path::Path;
 use std::process::Command;
 
 /// A single git commit entry from the log.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GitCommitEntry {
     pub hash: String,
     pub subject: String,
 }
 
 /// Git-aware context gathered at startup for injection into the system prompt.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GitContext {
     pub branch: Option<String>,
     pub recent_commits: Vec<GitCommitEntry>,
