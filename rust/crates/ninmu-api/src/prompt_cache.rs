@@ -121,6 +121,9 @@ impl PromptCache {
     #[must_use]
     pub fn with_config(config: PromptCacheConfig) -> Self {
         let paths = PromptCachePaths::for_session(&config.session_id);
+        let lock_file = create_lock_file(&paths.lock_file_path);
+        lock_shared_with_timeout(&lock_file, Duration::from_secs(5));
+        let _guard = FileLockGuard { file: &lock_file };
         let stats = read_json::<PromptCacheStats>(&paths.stats_path).unwrap_or_default();
         let previous = read_json::<TrackedPromptState>(&paths.session_state_path);
         Self {
@@ -129,6 +132,7 @@ impl PromptCache {
                 paths,
                 stats,
                 previous,
+                lock_file,
             })),
         }
     }

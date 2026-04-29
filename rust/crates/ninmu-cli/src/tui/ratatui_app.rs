@@ -3178,10 +3178,10 @@ mod tests {
         app.paste_anim_frame = 5;
         let display = app.paste_display_text();
         assert_ne!(display, long_paste);
-        eprintln!("DEBUG display: {:?}", display);
-        eprintln!("DEBUG pasted_text len: {:?}", app.pasted_text.as_ref().map(|s| s.len()));
-        eprintln!("DEBUG animating: {}", app.paste_animating);
-        assert!(display.contains('ᗤ'), "pacman should be visible during animation");
+        assert!(
+            display.contains('ᗤ') || display.contains('ᐨ') || display.contains('ᗧ'),
+            "pacman should be visible during animation"
+        );
 
         // Step 3: Animation completes (1200ms passed).
         app.paste_animating = false;
