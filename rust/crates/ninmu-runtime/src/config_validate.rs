@@ -828,7 +828,7 @@ mod tests {
     #[test]
     fn check_unsupported_format_rejects_toml() {
         // given
-        let path = PathBuf::from("/home/.claw/settings.toml");
+        let path = PathBuf::from("/home/.ninmu/settings.toml");
 
         // when
         let result = check_unsupported_format(&path);
@@ -843,7 +843,7 @@ mod tests {
     #[test]
     fn check_unsupported_format_allows_json() {
         // given
-        let path = PathBuf::from("/home/.claw/settings.json");
+        let path = PathBuf::from("/home/.ninmu/settings.json");
 
         // when / then
         assert!(check_unsupported_format(&path).is_ok());

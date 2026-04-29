@@ -88,7 +88,7 @@ Primary artifacts:
 | Todo tracking | ✅ |
 | Notebook editing | ✅ |
 | CLAUDE.md / project memory | ✅ |
-| Config file hierarchy (`.claw.json` + merged config sections) | ✅ |
+| Config file hierarchy (`.ninmu.json` + merged config sections) | ✅ |
 | Permission system | ✅ |
 | MCP server lifecycle + inspection | ✅ |
 | Session persistence + resume | ✅ |

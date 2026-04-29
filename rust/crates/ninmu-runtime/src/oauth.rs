@@ -399,7 +399,7 @@ fn generate_random_token(bytes: usize) -> io::Result<String> {
 }
 
 fn credentials_home_dir() -> io::Result<PathBuf> {
-    if let Some(path) = std::env::var_os("CLAW_CONFIG_HOME") {
+    if let Some(path) = std::env::var_os("NINMU_CONFIG_HOME") {
         return Ok(PathBuf::from(path));
     }
     let home = std::env::var_os("HOME")
@@ -408,10 +408,10 @@ fn credentials_home_dir() -> io::Result<PathBuf> {
             io::Error::new(
                 io::ErrorKind::NotFound,
                 "HOME is not set (on Windows, set USERPROFILE or HOME, \
-                 or use CLAW_CONFIG_HOME to point directly at the config directory)",
+                 or use NINMU_CONFIG_HOME to point directly at the config directory)",
             )
         })?;
-    Ok(PathBuf::from(home).join(".claw"))
+    Ok(PathBuf::from(home).join(".ninmu"))
 }
 
 fn read_credentials_root(path: &PathBuf) -> io::Result<Map<String, Value>> {
@@ -603,7 +603,7 @@ mod tests {
     fn oauth_credentials_round_trip_and_clear_preserves_other_fields() {
         let _guard = env_lock();
         let config_home = temp_config_home();
-        std::env::set_var("CLAW_CONFIG_HOME", &config_home);
+        std::env::set_var("NINMU_CONFIG_HOME", &config_home);
         let path = credentials_path().expect("credentials path");
         std::fs::create_dir_all(path.parent().expect("parent")).expect("create parent");
         std::fs::write(&path, "{\"other\":\"value\"}\n").expect("seed credentials");
@@ -629,7 +629,7 @@ mod tests {
         assert!(cleared.contains("\"other\": \"value\""));
         assert!(!cleared.contains("\"oauth\""));
 
-        std::env::remove_var("CLAW_CONFIG_HOME");
+        std::env::remove_var("NINMU_CONFIG_HOME");
         std::fs::remove_dir_all(config_home).expect("cleanup temp dir");
     }
 
@@ -728,7 +728,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             let _guard = env_lock();
             let config_home = temp_config_home();
-            std::env::set_var("CLAW_CONFIG_HOME", &config_home);
+            std::env::set_var("NINMU_CONFIG_HOME", &config_home);
             let path = credentials_path().expect("credentials path");
             std::fs::create_dir_all(path.parent().expect("parent")).expect("create parent");
 
@@ -746,9 +746,9 @@ mod tests {
 
             let parent_meta = std::fs::metadata(path.parent().unwrap()).expect("stat dir");
             let parent_mode = parent_meta.permissions().mode() & 0o777;
-            assert_eq!(parent_mode, 0o700, ".claw directory must be 0o700");
+            assert_eq!(parent_mode, 0o700, ".ninmu directory must be 0o700");
 
-            std::env::remove_var("CLAW_CONFIG_HOME");
+            std::env::remove_var("NINMU_CONFIG_HOME");
             let _ = std::fs::remove_dir_all(&config_home);
         }
     }

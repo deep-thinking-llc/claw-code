@@ -196,7 +196,7 @@ ninmu --model vllm/meta-llama/Llama-3.1-8B prompt "hello"
 
 ### Provider Configuration
 
-Set provider-specific defaults in `~/.claw/settings.json` or `.claw/settings.json`:
+Set provider-specific defaults in `~/.ninmu/settings.json` or `.ninmu/settings.json`:
 
 ```json
 {

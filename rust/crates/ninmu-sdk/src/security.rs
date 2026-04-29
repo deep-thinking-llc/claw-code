@@ -271,7 +271,7 @@ impl AuditLog {
         if filename.contains('/') || filename.contains('\\') {
             return Err("invalid filename: path separators not allowed".to_string());
         }
-        let path = PathBuf::from(".claw").join(filename);
+        let path = PathBuf::from(".ninmu").join(filename);
         let parent = path.parent().expect("parent exists");
         if !parent.exists() {
             fs::create_dir_all(parent)
@@ -372,7 +372,7 @@ impl SecurityConfig {
     pub fn production() -> Self {
         Self {
             scrub_enabled: true,
-            audit_path: Some(PathBuf::from(".claw/audit.jsonl")),
+            audit_path: Some(PathBuf::from(".ninmu/audit.jsonl")),
             audit_memory_limit: 10_000,
             block_prompt_secrets: true,
         }
@@ -504,7 +504,7 @@ mod tests {
             assert_eq!(log.len(), 1);
             assert_eq!(log.filter(AuditEvent::FileModified).len(), 1);
         }
-        let _ = fs::remove_file(PathBuf::from(".claw").join(&tmp));
+        let _ = fs::remove_file(PathBuf::from(".ninmu").join(&tmp));
     }
 
     #[test]

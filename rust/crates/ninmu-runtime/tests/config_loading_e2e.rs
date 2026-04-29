@@ -35,21 +35,21 @@ fn write_json(path: &Path, json: &serde_json::Value) {
 }
 
 fn settings_json(dir: &Path) -> PathBuf {
-    dir.join(".claw").join("settings.json")
+    dir.join(".ninmu").join("settings.json")
 }
 
 fn user_settings_json(home: &Path) -> PathBuf {
-    home.join(".claw").join("settings.json")
+    home.join(".ninmu").join("settings.json")
 }
 
 fn local_settings_json(dir: &Path) -> PathBuf {
-    dir.join(".claw").join("settings.local.json")
+    dir.join(".ninmu").join("settings.local.json")
 }
 
 #[test]
 fn empty_config_loads_defaults() {
     let dir = temp_dir("defaults");
-    let loader = ConfigLoader::new(&dir, dir.join(".claw"));
+    let loader = ConfigLoader::new(&dir, dir.join(".ninmu"));
     let config = loader.load().unwrap();
 
     assert!(config.model().is_none(), "model should default to None");
@@ -74,7 +74,7 @@ fn user_config_discovered_and_loaded() {
 
     write_json(&home_settings, &serde_json::json!({ "model": "gpt-4o" }));
 
-    let loader = ConfigLoader::new(&dir, home.join(".claw"));
+    let loader = ConfigLoader::new(&dir, home.join(".ninmu"));
     let config = loader.load().unwrap();
 
     assert_eq!(config.model(), Some("gpt-4o"));
@@ -98,7 +98,7 @@ fn project_config_overrides_user() {
     let proj_settings = settings_json(&dir);
     write_json(&proj_settings, &serde_json::json!({ "model": "gpt-4o" }));
 
-    let loader = ConfigLoader::new(&dir, home.join(".claw"));
+    let loader = ConfigLoader::new(&dir, home.join(".ninmu"));
     let config = loader.load().unwrap();
 
     assert_eq!(
@@ -126,7 +126,7 @@ fn local_config_overrides_project() {
         &serde_json::json!({ "model": "claude-sonnet-4-6" }),
     );
 
-    let loader = ConfigLoader::new(&dir, home.join(".claw"));
+    let loader = ConfigLoader::new(&dir, home.join(".ninmu"));
     let config = loader.load().unwrap();
 
     assert_eq!(
@@ -145,7 +145,7 @@ fn malformed_json_produces_error() {
     let settings = settings_json(&dir);
     write_json_raw(&settings, "{ invalid json !!!");
 
-    let loader = ConfigLoader::new(&dir, dir.join(".claw"));
+    let loader = ConfigLoader::new(&dir, dir.join(".ninmu"));
     let result = loader.load();
 
     assert!(result.is_err(), "malformed JSON should fail to load");
@@ -156,7 +156,7 @@ fn malformed_json_produces_error() {
 #[test]
 fn toml_file_rejected() {
     let dir = temp_dir("toml");
-    let toml_path = dir.join(".claw").join("settings.toml");
+    let toml_path = dir.join(".ninmu").join("settings.toml");
     fs::create_dir_all(toml_path.parent().unwrap()).unwrap();
     fs::write(&toml_path, "model = \"gpt-4o\"").unwrap();
 
@@ -192,7 +192,7 @@ fn mcp_servers_deep_merged_across_scopes() {
         }),
     );
 
-    let loader = ConfigLoader::new(&dir, home.join(".claw"));
+    let loader = ConfigLoader::new(&dir, home.join(".ninmu"));
     let config = loader.load().unwrap();
 
     let mcp = config.mcp();
@@ -218,7 +218,7 @@ fn loaded_entries_tracks_sources() {
     let home_settings = user_settings_json(&home);
     write_json(&home_settings, &serde_json::json!({ "model": "gpt-4o" }));
 
-    let loader = ConfigLoader::new(&dir, home.join(".claw"));
+    let loader = ConfigLoader::new(&dir, home.join(".ninmu"));
     let config = loader.load().unwrap();
 
     assert!(
@@ -247,7 +247,7 @@ fn aliases_parsed_correctly() {
         }),
     );
 
-    let loader = ConfigLoader::new(&dir, home.join(".claw"));
+    let loader = ConfigLoader::new(&dir, home.join(".ninmu"));
     let config = loader.load().unwrap();
 
     assert_eq!(config.aliases().get("fast"), Some(&"gpt-4o".to_string()));
@@ -277,7 +277,7 @@ fn sandbox_config_parsed() {
         }),
     );
 
-    let loader = ConfigLoader::new(&dir, home.join(".claw"));
+    let loader = ConfigLoader::new(&dir, home.join(".ninmu"));
     let config = loader.load().unwrap();
 
     let sandbox = config.sandbox();

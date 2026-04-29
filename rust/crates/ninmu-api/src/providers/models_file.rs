@@ -1,7 +1,7 @@
 //! Runtime-loaded model configuration from `models.json`.
 //!
-//! Users can define custom providers and models in `~/.claw/models.json` or
-//! `.claw/models.json` (project-local). The file is loaded lazily on first
+//! Users can define custom providers and models in `~/.ninmu/models.json` or
+//! `.ninmu/models.json` (project-local). The file is loaded lazily on first
 //! access and can be refreshed at any time.
 
 use std::collections::BTreeMap;
@@ -225,16 +225,16 @@ fn load_and_merge_custom_models(path: &Path) -> Result<Option<ModelsFile>, Strin
 
 /// Discover and load models.json from standard config paths.
 ///
-/// Checks `~/.claw/models.json` and `.claw/models.json` (project-local).
+/// Checks `~/.ninmu/models.json` and `.ninmu/models.json` (project-local).
 /// Project-level provider entries override user-level entries with the same
 /// key, but user-level entries with different keys are preserved.
 pub fn discover_and_load_models(cwd: &Path, config_home: &Path) -> Result<(), String> {
-    // User-level: ~/.claw/models.json
+    // User-level: ~/.ninmu/models.json
     let user_path = config_home.join("models.json");
     let _user_loaded = load_custom_models(&user_path)?;
 
-    // Project-level: .claw/models.json (merges into user-level; same-key entries override)
-    let project_path = cwd.join(".claw").join("models.json");
+    // Project-level: .ninmu/models.json (merges into user-level; same-key entries override)
+    let project_path = cwd.join(".ninmu").join("models.json");
     let _project_loaded = load_and_merge_custom_models(&project_path)?;
 
     Ok(())
@@ -510,10 +510,10 @@ mod tests {
                 .unwrap_or_default()
                 .as_millis()
         ));
-        let config_home = dir.join("home").join(".claw");
+        let config_home = dir.join("home").join(".ninmu");
         let cwd = dir.join("project");
         std::fs::create_dir_all(&config_home).expect("create config home");
-        std::fs::create_dir_all(cwd.join(".claw")).expect("create project .claw");
+        std::fs::create_dir_all(cwd.join(".ninmu")).expect("create project .ninmu");
 
         // User-level: defines "ollama" provider
         std::fs::write(
@@ -524,7 +524,7 @@ mod tests {
 
         // Project-level: defines "local" provider (different key)
         std::fs::write(
-            cwd.join(".claw").join("models.json"),
+            cwd.join(".ninmu").join("models.json"),
             r#"{"providers":{"local":{"baseUrl":"http://127.0.0.1:8080/v1","api":"openai-completions","apiKey":"local","models":[{"id":"my-model"}]}}}"#,
         )
         .expect("write project models.json");
@@ -569,10 +569,10 @@ mod tests {
                 .unwrap_or_default()
                 .as_millis()
         ));
-        let config_home = dir.join("home").join(".claw");
+        let config_home = dir.join("home").join(".ninmu");
         let cwd = dir.join("project");
         std::fs::create_dir_all(&config_home).expect("create config home");
-        std::fs::create_dir_all(cwd.join(".claw")).expect("create project .claw");
+        std::fs::create_dir_all(cwd.join(".ninmu")).expect("create project .ninmu");
 
         // User-level: defines "ollama" with llama3.1:8b
         std::fs::write(
@@ -583,7 +583,7 @@ mod tests {
 
         // Project-level: same key "ollama" but different base URL (override)
         std::fs::write(
-            cwd.join(".claw").join("models.json"),
+            cwd.join(".ninmu").join("models.json"),
             r#"{"providers":{"ollama":{"baseUrl":"http://custom-ollama:11434/v1","api":"openai-completions","apiKey":"project-key","models":[{"id":"qwen2.5:7b"}]}}}"#,
         )
         .expect("write project models.json");

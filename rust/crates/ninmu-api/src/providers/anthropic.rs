@@ -18,7 +18,9 @@ use crate::prompt_cache::{PromptCache, PromptCacheRecord, PromptCacheStats};
 
 use super::{anthropic_missing_credentials, model_token_limit, resolve_model_alias};
 use crate::sse::SseParser;
-use crate::types::{MessageDeltaEvent, MessageRequest, MessageResponse, StreamEvent, Usage};
+use crate::types::{
+    InputMessage, MessageDeltaEvent, MessageRequest, MessageResponse, StreamEvent, Usage,
+};
 
 pub const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 const REQUEST_ID_HEADER: &str = "request-id";
@@ -297,6 +299,7 @@ impl AnthropicClient {
             }
         }
 
+        self.maybe_send_keepalive(&request).await?;
         self.preflight_message_request(&request).await?;
 
         let http_response = self.send_with_retry(&request).await?;
@@ -335,6 +338,7 @@ impl AnthropicClient {
                     ),
             );
         }
+        self.update_last_request_time();
         Ok(response)
     }
 
@@ -342,10 +346,12 @@ impl AnthropicClient {
         &self,
         request: &MessageRequest,
     ) -> Result<MessageStream, ApiError> {
+        self.maybe_send_keepalive(request).await?;
         self.preflight_message_request(request).await?;
         let response = self
             .send_with_retry(&request.clone().with_streaming())
             .await?;
+        self.update_last_request_time();
         Ok(MessageStream {
             request_id: request_id_from_headers(response.headers()),
             response,
@@ -568,6 +574,61 @@ impl AnthropicClient {
             .last_prompt_cache_record
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(record);
+    }
+
+    fn update_last_request_time(&self) {
+        *self
+            .last_request_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Instant::now());
+    }
+
+    async fn maybe_send_keepalive(&self, request: &MessageRequest) -> Result<(), ApiError> {
+        let should_ping = {
+            let last = self
+                .last_request_time
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            match *last {
+                Some(instant) => instant.elapsed() >= CACHE_KEEPALIVE_THRESHOLD,
+                None => false,
+            }
+        };
+
+        if !should_ping {
+            return Ok(());
+        }
+
+        let ping_request = MessageRequest {
+            model: request.model.clone(),
+            max_tokens: 1,
+            messages: vec![InputMessage::user_text("ping")],
+            system: request.system.clone(),
+            tools: request.tools.clone(),
+            tool_choice: None,
+            stream: false,
+            temperature: None,
+            top_p: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+            stop: None,
+            reasoning_effort: None,
+            thinking_mode: None,
+        };
+
+        let response = self.send_raw_request(&ping_request).await?;
+        let _ = expect_success(response).await?;
+
+        // Re-check under lock to avoid redundant pings from concurrent requests.
+        let mut last = self
+            .last_request_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if last.is_none_or(|i| i.elapsed() >= CACHE_KEEPALIVE_THRESHOLD) {
+            *last = Some(Instant::now());
+        }
+
+        Ok(())
     }
 
     fn backoff_for_attempt(&self, attempt: u32) -> Result<Duration, ApiError> {
@@ -1143,7 +1204,7 @@ mod tests {
         let _guard = env_lock();
         std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
         std::env::remove_var("ANTHROPIC_API_KEY");
-        std::env::remove_var("CLAW_CONFIG_HOME");
+        std::env::remove_var("NINMU_CONFIG_HOME");
         let error = super::read_api_key().expect_err("missing key should error");
         assert!(matches!(
             error,
@@ -1213,7 +1274,7 @@ mod tests {
     fn auth_source_from_env_or_saved_ignores_saved_oauth_when_env_absent() {
         let _guard = env_lock();
         let config_home = temp_config_home();
-        std::env::set_var("CLAW_CONFIG_HOME", &config_home);
+        std::env::set_var("NINMU_CONFIG_HOME", &config_home);
         std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
         std::env::remove_var("ANTHROPIC_API_KEY");
         save_oauth_credentials(&ninmu_runtime::OAuthTokenSet {
@@ -1228,7 +1289,7 @@ mod tests {
         assert!(error.to_string().contains("ANTHROPIC_API_KEY"));
 
         clear_oauth_credentials().expect("clear credentials");
-        std::env::remove_var("CLAW_CONFIG_HOME");
+        std::env::remove_var("NINMU_CONFIG_HOME");
         cleanup_temp_config_home(&config_home);
     }
 
@@ -1252,7 +1313,7 @@ mod tests {
     fn resolve_saved_oauth_token_refreshes_expired_credentials() {
         let _guard = env_lock();
         let config_home = temp_config_home();
-        std::env::set_var("CLAW_CONFIG_HOME", &config_home);
+        std::env::set_var("NINMU_CONFIG_HOME", &config_home);
         std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
         std::env::remove_var("ANTHROPIC_API_KEY");
         save_oauth_credentials(&ninmu_runtime::OAuthTokenSet {
@@ -1276,7 +1337,7 @@ mod tests {
         assert_eq!(stored.access_token, "refreshed-token");
 
         clear_oauth_credentials().expect("clear credentials");
-        std::env::remove_var("CLAW_CONFIG_HOME");
+        std::env::remove_var("NINMU_CONFIG_HOME");
         cleanup_temp_config_home(&config_home);
     }
 
@@ -1284,7 +1345,7 @@ mod tests {
     fn resolve_startup_auth_source_ignores_saved_oauth_without_loading_config() {
         let _guard = env_lock();
         let config_home = temp_config_home();
-        std::env::set_var("CLAW_CONFIG_HOME", &config_home);
+        std::env::set_var("NINMU_CONFIG_HOME", &config_home);
         std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
         std::env::remove_var("ANTHROPIC_API_KEY");
         save_oauth_credentials(&ninmu_runtime::OAuthTokenSet {
@@ -1300,7 +1361,7 @@ mod tests {
         assert!(error.to_string().contains("ANTHROPIC_API_KEY"));
 
         clear_oauth_credentials().expect("clear credentials");
-        std::env::remove_var("CLAW_CONFIG_HOME");
+        std::env::remove_var("NINMU_CONFIG_HOME");
         cleanup_temp_config_home(&config_home);
     }
 
@@ -1308,7 +1369,7 @@ mod tests {
     fn resolve_saved_oauth_token_preserves_refresh_token_when_refresh_response_omits_it() {
         let _guard = env_lock();
         let config_home = temp_config_home();
-        std::env::set_var("CLAW_CONFIG_HOME", &config_home);
+        std::env::set_var("NINMU_CONFIG_HOME", &config_home);
         std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
         std::env::remove_var("ANTHROPIC_API_KEY");
         save_oauth_credentials(&ninmu_runtime::OAuthTokenSet {
@@ -1333,7 +1394,7 @@ mod tests {
         assert_eq!(stored.refresh_token.as_deref(), Some("refresh-token"));
 
         clear_oauth_credentials().expect("clear credentials");
-        std::env::remove_var("CLAW_CONFIG_HOME");
+        std::env::remove_var("NINMU_CONFIG_HOME");
         cleanup_temp_config_home(&config_home);
     }
 
@@ -1832,5 +1893,117 @@ mod tests {
         // With only 1 message, no messages get cache_control (all are in last 2)
         let messages = body.get("messages").unwrap().as_array().unwrap();
         assert!(messages[0]["content"].is_string());
+    }
+
+    #[tokio::test]
+    async fn maybe_send_keepalive_skips_on_first_request() {
+        let client = super::AnthropicClient::new("dummy-key");
+        let request = super::MessageRequest {
+            model: "claude-sonnet-4-6".to_string(),
+            max_tokens: 1024,
+            messages: vec![],
+            system: None,
+            tools: None,
+            tool_choice: None,
+            stream: false,
+            temperature: None,
+            top_p: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+            stop: None,
+            reasoning_effort: None,
+            thinking_mode: None,
+        };
+
+        client.maybe_send_keepalive(&request).await.unwrap();
+
+        let last = client.last_request_time.lock().unwrap();
+        assert!(last.is_none(), "first request should not trigger keepalive");
+    }
+
+    #[tokio::test]
+    async fn maybe_send_keepalive_skips_when_recent() {
+        let client = super::AnthropicClient::new("dummy-key");
+        client.update_last_request_time();
+
+        let request = super::MessageRequest {
+            model: "claude-sonnet-4-6".to_string(),
+            max_tokens: 1024,
+            messages: vec![],
+            system: None,
+            tools: None,
+            tool_choice: None,
+            stream: false,
+            temperature: None,
+            top_p: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+            stop: None,
+            reasoning_effort: None,
+            thinking_mode: None,
+        };
+
+        client.maybe_send_keepalive(&request).await.unwrap();
+
+        let last = client.last_request_time.lock().unwrap();
+        assert!(
+            last.is_some(),
+            "recent request should not trigger keepalive"
+        );
+    }
+
+    #[tokio::test]
+    async fn maybe_send_keepalive_sends_ping_when_idle() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 32768];
+            let _ = socket.read(&mut buf).await;
+            let response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
+            let _ = socket.write_all(response.as_bytes()).await;
+            let _ = socket.shutdown().await;
+        });
+
+        let client = super::AnthropicClient::new("dummy-key")
+            .with_base_url(format!("http://127.0.0.1:{port}"));
+
+        let old_instant = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_mins(5))
+            .unwrap();
+        *client.last_request_time.lock().unwrap() = Some(old_instant);
+
+        let request = super::MessageRequest {
+            model: "claude-sonnet-4-6".to_string(),
+            max_tokens: 1024,
+            messages: vec![],
+            system: Some("system prompt".to_string()),
+            tools: Some(vec![crate::ToolDefinition {
+                name: "test_tool".to_string(),
+                description: None,
+                input_schema: serde_json::json!({"type": "object"}),
+            }]),
+            tool_choice: None,
+            stream: false,
+            temperature: None,
+            top_p: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+            stop: None,
+            reasoning_effort: None,
+            thinking_mode: None,
+        };
+
+        client.maybe_send_keepalive(&request).await.unwrap();
+
+        let last = client.last_request_time.lock().unwrap();
+        let elapsed = last.unwrap().elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "last_request_time should have been updated after keepalive ping"
+        );
     }
 }

@@ -77,7 +77,7 @@ This document compares pi-mono's approach with ninmu-code's, tracks what's been 
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| File locations | `~/.claw/models.json` (user) + `.claw/models.json` (project) | Matches existing `.claw` config convention |
+| File locations | `~/.ninmu/models.json` (user) + `.ninmu/models.json` (project) | Matches existing `.ninmu` config convention |
 | Merge strategy | Project entries override same-key user entries; different keys coexist | User can have global Ollama + project-specific providers without conflict |
 | API key resolution | All-uppercase string → env var; otherwise literal | Simple heuristic that covers `OLLAMA_API_KEY`, `MY_KEY` etc. |
 | API protocol | `"openai-completions"` (default) or `"anthropic-messages"` | Routes to `OpenAiCompatClient` or `AnthropicClient` respectively |

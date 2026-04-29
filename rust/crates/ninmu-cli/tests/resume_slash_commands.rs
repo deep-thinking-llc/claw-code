@@ -117,8 +117,8 @@ fn resumed_config_command_loads_settings_files_end_to_end() {
     // given
     let temp_dir = unique_temp_dir("resume-config");
     let project_dir = temp_dir.join("project");
-    let config_home = temp_dir.join("home").join(".claw");
-    fs::create_dir_all(project_dir.join(".claw")).expect("project config dir should exist");
+    let config_home = temp_dir.join("home").join(".ninmu");
+    fs::create_dir_all(project_dir.join(".ninmu")).expect("project config dir should exist");
     fs::create_dir_all(&config_home).expect("config home should exist");
 
     let session_path = project_dir.join("session.jsonl");
@@ -130,7 +130,7 @@ fn resumed_config_command_loads_settings_files_end_to_end() {
     fs::write(config_home.join("settings.json"), r#"{"model":"haiku"}"#)
         .expect("user config should write");
     fs::write(
-        project_dir.join(".claw").join("settings.local.json"),
+        project_dir.join(".ninmu").join("settings.local.json"),
         r#"{"model":"opus"}"#,
     )
     .expect("local config should write");
@@ -144,7 +144,10 @@ fn resumed_config_command_loads_settings_files_end_to_end() {
             "/config",
             "model",
         ],
-        &[("CLAW_CONFIG_HOME", config_home.to_str().expect("utf8 path"))],
+        &[(
+            "NINMU_CONFIG_HOME",
+            config_home.to_str().expect("utf8 path"),
+        )],
     );
 
     // then
@@ -166,7 +169,7 @@ fn resumed_config_command_loads_settings_files_end_to_end() {
     ));
     assert!(stdout.contains(
         project_dir
-            .join(".claw")
+            .join(".ninmu")
             .join("settings.local.json")
             .to_str()
             .expect("utf8 path")

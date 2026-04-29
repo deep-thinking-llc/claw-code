@@ -750,12 +750,12 @@ pub(crate) fn run_doctor(output_format: CliOutputFormat) -> Result<(), Box<dyn s
     Ok(())
 }
 
-/// Read `.claw/worker-state.json` from the current working directory and print it.
+/// Read `.ninmu/worker-state.json` from the current working directory and print it.
 pub(crate) fn run_worker_state(
     output_format: CliOutputFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let cwd = env::current_dir()?;
-    let state_path = cwd.join(".claw").join("worker-state.json");
+    let state_path = cwd.join(".ninmu").join("worker-state.json");
     if !state_path.exists() {
         return Err(format!(
             "no worker state file found at {path}\n  Hint: worker state is written by the interactive REPL or a non-interactive prompt.\n  Run:   ninmu               # start the REPL (writes state on first turn)\n  Or:    ninmu prompt <text> # run one non-interactive turn\n  Then rerun: ninmu state [--output-format json]",
@@ -1974,7 +1974,7 @@ fn check_providers_health() -> DiagnosticCheck {
     if configured_count == 0 {
         details.push(String::new());
         details.push(
-            "Set one of the above env vars or create ~/.claw/models.json for custom providers"
+            "Set one of the above env vars or create ~/.ninmu/models.json for custom providers"
                 .to_string(),
         );
     }

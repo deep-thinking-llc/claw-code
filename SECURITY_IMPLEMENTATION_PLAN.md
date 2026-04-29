@@ -27,11 +27,11 @@
 **Location**: `crates/ninmu-runtime/src/oauth.rs:283-294` (`save_oauth_credentials`), `credentials_home_dir()`, `write_credentials_root()`
 
 **Current behavior**:
-- Access tokens, refresh tokens, and scopes are serialized to `~/.claw/credentials.json` in plain text.
+- Access tokens, refresh tokens, and scopes are serialized to `~/.ninmu/credentials.json` in plain text.
 - No encryption, no keychain integration, no restrictive file permissions.
 - On shared/multi-user systems, other users can read the file (default umask `0o644`).
 
-**Exploit path**: A malicious process or user with filesystem access reads `~/.claw/credentials.json` and obtains the `access_token`, enabling full API access.
+**Exploit path**: A malicious process or user with filesystem access reads `~/.ninmu/credentials.json` and obtains the `access_token`, enabling full API access.
 
 **Fix**:
 
@@ -44,7 +44,7 @@
          fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
      }
      ```
-   - After `write_credentials_root()`, on the parent `.claw` directory:
+   - After `write_credentials_root()`, on the parent `.ninmu` directory:
      ```rust
      #[cfg(unix)]
      {
@@ -62,7 +62,7 @@
 
 **Tests**:
 - `test_credentials_file_mode_is_restricted`: write a token, stat the file, assert mode `0o600` on Unix.
-- `test_credentials_dir_mode_is_restricted`: assert `~/.claw` is `0o700`.
+- `test_credentials_dir_mode_is_restricted`: assert `~/.ninmu` is `0o700`.
 - `test_credentials_round_trip_preserved`: existing test still passes (regression).
 
 ---

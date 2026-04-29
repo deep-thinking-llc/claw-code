@@ -147,12 +147,12 @@ fn e2e_discover_and_load_from_standard_paths() {
     let _lock = e2e_lock();
     clear_and_setup();
     let dir = temp_dir();
-    let config_home = dir.join(".claw");
+    let config_home = dir.join(".ninmu");
     let cwd = dir.join("project");
     fs::create_dir_all(config_home.join("sessions")).expect("create config home");
-    fs::create_dir_all(cwd.join(".claw")).expect("create project config");
+    fs::create_dir_all(cwd.join(".ninmu")).expect("create project config");
 
-    let project_models = cwd.join(".claw").join("models.json");
+    let project_models = cwd.join(".ninmu").join("models.json");
     fs::write(
         &project_models,
         r#"{"providers":{"local":{"baseUrl":"http://127.0.0.1:8080/v1","api":"openai-completions","apiKey":"test","models":[{"id":"test-model"}]}}}"#,
@@ -174,7 +174,7 @@ fn e2e_discover_without_models_file_does_not_error() {
     let _lock = e2e_lock();
     clear_and_setup();
     let dir = temp_dir();
-    let config_home = dir.join(".claw");
+    let config_home = dir.join(".ninmu");
     let cwd = dir.join("project");
     fs::create_dir_all(&config_home).expect("create config home");
     fs::create_dir_all(&cwd).expect("create project dir");

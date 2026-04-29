@@ -1314,17 +1314,33 @@ impl RatatuiApp {
             };
             let entry = &sel.all_entries[fi];
             let is_selected = vi == sel.selected;
+            let no_auth = !entry.has_auth;
             let prov = ModelSelector::provider_label(entry.provider);
 
-            let highlight = if is_selected {
-                Style::default().fg(TEXT).bg(ACCENT)
+            let text_color = if is_selected {
+                TEXT
+            } else if no_auth {
+                MUTED
             } else {
-                Style::default().fg(TEXT)
+                TEXT
+            };
+            let highlight = if is_selected {
+                if no_auth {
+                    Style::default().fg(MUTED).bg(Color::Rgb(80, 50, 50))
+                } else {
+                    Style::default().fg(TEXT).bg(ACCENT)
+                }
+            } else {
+                Style::default().fg(text_color)
             };
             let prov_style = if is_selected {
-                Style::default().fg(Color::Rgb(255, 200, 170)).bg(ACCENT)
+                if no_auth {
+                    Style::default().fg(MUTED).bg(Color::Rgb(80, 50, 50))
+                } else {
+                    Style::default().fg(Color::Rgb(255, 200, 170)).bg(ACCENT)
+                }
             } else {
-                Style::default().fg(MUTED)
+                Style::default().fg(if no_auth { MUTED } else { MUTED })
             };
 
             let label = if entry.alias == entry.canonical {
@@ -1332,11 +1348,24 @@ impl RatatuiApp {
             } else {
                 format!("{} → {}", entry.alias, entry.canonical)
             };
+            let no_key = if no_auth && is_selected {
+                "  key required"
+            } else if no_auth {
+                "  key?"
+            } else {
+                ""
+            };
 
             lines.push(Line::from(vec![
                 Span::styled(if is_selected { " > " } else { "   " }, highlight),
                 Span::styled(label, highlight),
                 Span::styled(format!("  {prov}"), prov_style),
+                Span::styled(
+                    no_key,
+                    Style::default()
+                        .fg(ERROR_COLOR)
+                        .add_modifier(Modifier::BOLD),
+                ),
             ]));
         }
 

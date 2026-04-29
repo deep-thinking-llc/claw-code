@@ -237,7 +237,7 @@ fn read_claw_base_file_returns_content() {
         .unwrap();
     let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
-    fs::write(dir.join(".claw-base"), &sha).unwrap();
+    fs::write(dir.join(".ninmu-base"), &sha).unwrap();
 
     let result = read_claw_base_file(&dir);
     assert_eq!(result, Some(sha));

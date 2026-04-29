@@ -124,6 +124,24 @@ const MODEL_REGISTRY: &[(&str, ProviderMetadata)] = &[
         },
     ),
     (
+        "grok-4",
+        ProviderMetadata {
+            provider: ProviderKind::Xai,
+            auth_env: "XAI_API_KEY",
+            base_url_env: "XAI_BASE_URL",
+            default_base_url: openai_compat::DEFAULT_XAI_BASE_URL,
+        },
+    ),
+    (
+        "grok-4-mini",
+        ProviderMetadata {
+            provider: ProviderKind::Xai,
+            auth_env: "XAI_API_KEY",
+            base_url_env: "XAI_BASE_URL",
+            default_base_url: openai_compat::DEFAULT_XAI_BASE_URL,
+        },
+    ),
+    (
         "kimi",
         ProviderMetadata {
             provider: ProviderKind::OpenAi,
@@ -197,6 +215,18 @@ pub struct ModelEntry {
     pub canonical: String,
     /// Provider kind.
     pub provider: ProviderKind,
+    /// Whether the required API key env var is set.
+    pub has_auth: bool,
+}
+
+/// Check whether any model in the registry for the given provider has its
+/// auth env var configured.
+#[must_use]
+pub fn has_auth_for_provider(provider: ProviderKind) -> bool {
+    MODEL_REGISTRY
+        .iter()
+        .find(|(_, meta)| meta.provider == provider)
+        .map_or(false, |(_, meta)| std::env::var(meta.auth_env).is_ok())
 }
 
 /// Returns all registered model entries (from `MODEL_REGISTRY`) plus any
@@ -209,6 +239,7 @@ pub fn list_available_models() -> Vec<ModelEntry> {
             alias: (*alias).to_string(),
             canonical: resolve_model_alias(alias),
             provider: metadata.provider,
+            has_auth: std::env::var(metadata.auth_env).is_ok(),
         })
         .collect();
     // Deduplicate: skip entries whose canonical name is already present.
@@ -221,10 +252,15 @@ pub fn list_available_models() -> Vec<ModelEntry> {
             if seen.insert(model.model_id.clone()) {
                 let provider = metadata_for_model(&model.model_id)
                     .map_or(ProviderKind::OpenAi, |m| m.provider);
+                let has_auth = MODEL_REGISTRY
+                    .iter()
+                    .find(|(_, meta)| meta.provider == provider)
+                    .map_or(true, |(_, meta)| std::env::var(meta.auth_env).is_ok());
                 entries.push(ModelEntry {
                     alias: model.model_id.clone(),
                     canonical: model.model_id,
                     provider,
+                    has_auth,
                 });
             }
         }
@@ -232,13 +268,13 @@ pub fn list_available_models() -> Vec<ModelEntry> {
     entries
 }
 
-/// Returns the default config home directory (`~/.claw` or `$CLAW_CONFIG_HOME`).
+/// Returns the default config home directory (`~/.ninmu` or `$NINMU_CONFIG_HOME`).
 fn config_home_dir() -> std::path::PathBuf {
-    std::env::var("CLAW_CONFIG_HOME")
+    std::env::var("NINMU_CONFIG_HOME")
         .ok()
         .map(std::path::PathBuf::from)
         .filter(|p| p.is_absolute())
-        .unwrap_or_else(|| dirs_or_default().join(".claw"))
+        .unwrap_or_else(|| dirs_or_default().join(".ninmu"))
 }
 
 fn dirs_or_default() -> std::path::PathBuf {
@@ -263,6 +299,8 @@ pub fn resolve_model_alias(model: &str) -> String {
                     "grok" | "grok-3" => "grok-3",
                     "grok-mini" | "grok-3-mini" => "grok-3-mini",
                     "grok-2" => "grok-2",
+                    "grok-4" => "grok-4",
+                    "grok-4-mini" => "grok-4-mini",
                     _ => trimmed,
                 },
                 ProviderKind::OpenAi => match *alias {
@@ -574,6 +612,16 @@ pub fn model_token_limit(model: &str) -> Option<ModelTokenLimit> {
         "grok-3" | "grok-3-mini" => Some(ModelTokenLimit {
             max_output_tokens: 64_000,
             context_window_tokens: 131_072,
+        }),
+        // xAI Grok-4 models
+        // Source: https://docs.x.ai/developers/models
+        "grok-4" => Some(ModelTokenLimit {
+            max_output_tokens: 8_192,
+            context_window_tokens: 128_000,
+        }),
+        "grok-4-mini" => Some(ModelTokenLimit {
+            max_output_tokens: 32_768,
+            context_window_tokens: 1_000_000,
         }),
         // DeepSeek models
         // Source: https://api-docs.deepseek.com/quick_start/pricing
@@ -961,8 +1009,8 @@ mod tests {
             .as_nanos();
         let root = std::env::temp_dir().join(format!("api-plugin-max-tokens-{nanos}"));
         let cwd = root.join("project");
-        let home = root.join("home").join(".claw");
-        std::fs::create_dir_all(cwd.join(".claw")).expect("project config dir");
+        let home = root.join("home").join(".ninmu");
+        std::fs::create_dir_all(cwd.join(".ninmu")).expect("project config dir");
         std::fs::create_dir_all(&home).expect("home config dir");
         std::fs::write(
             home.join("settings.json"),

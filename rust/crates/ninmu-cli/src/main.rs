@@ -726,7 +726,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             })
         }
         // #146: `config` is pure-local read-only introspection (merges
-        // `.claw.json` + `.claw/settings.json` from disk, no network, no
+        // `.ninmu.json` + `.ninmu/settings.json` from disk, no network, no
         // state mutation). Previously callers had to spin up a session with
         // `ninmu --resume SESSION.jsonl /config` to see their own config,
         // which is synthetic friction. Accepts an optional section name
@@ -1848,14 +1848,14 @@ fn render_help_topic(topic: LocalHelpTopic) -> String {
             .to_string(),
         LocalHelpTopic::Init => "Init
   Usage            ninmu init [--output-format <format>]
-  Purpose          create .claw/, .claw.json, .gitignore, and CLAUDE.md in the current project
+  Purpose          create .ninmu/, .ninmu.json, .gitignore, and CLAUDE.md in the current project
   Output           list of created vs. skipped files (idempotent: safe to re-run)
   Formats          text (default), json
   Related          ninmu status · ninmu doctor"
             .to_string(),
         LocalHelpTopic::State => "State
   Usage            ninmu state [--output-format <format>]
-  Purpose          read .claw/worker-state.json written by the interactive REPL or a one-shot prompt
+  Purpose          read .ninmu/worker-state.json written by the interactive REPL or a one-shot prompt
   Output           worker id, model, permissions, session reference (text or json)
   Formats          text (default), json
   Produces state   `ninmu` (interactive REPL) or `ninmu prompt <text>` (one non-interactive turn)
@@ -1866,7 +1866,7 @@ fn render_help_topic(topic: LocalHelpTopic) -> String {
         LocalHelpTopic::Export => "Export
   Usage            ninmu export [--session <id|latest>] [--output <path>] [--output-format <format>]
   Purpose          serialize a managed session to JSON for review, transfer, or archival
-  Defaults         --session latest (most recent managed session in .claw/sessions/)
+  Defaults         --session latest (most recent managed session in .ninmu/sessions/)
   Formats          text (default), json
   Related          /session list · ninmu --resume latest"
             .to_string(),
@@ -2767,24 +2767,24 @@ mod tests {
         let root = temp_dir();
         let cwd = root.join("project");
         let config_home = root.join("config-home");
-        std::fs::create_dir_all(cwd.join(".claw")).expect("project config dir should exist");
+        std::fs::create_dir_all(cwd.join(".ninmu")).expect("project config dir should exist");
         std::fs::create_dir_all(&config_home).expect("config home should exist");
         std::fs::write(
-            cwd.join(".claw").join("settings.json"),
+            cwd.join(".ninmu").join("settings.json"),
             r#"{"permissionMode":"acceptEdits"}"#,
         )
         .expect("project config should write");
 
-        let original_config_home = std::env::var("CLAW_CONFIG_HOME").ok();
+        let original_config_home = std::env::var("NINMU_CONFIG_HOME").ok();
         let original_permission_mode = std::env::var("RUSTY_CLAUDE_PERMISSION_MODE").ok();
-        std::env::set_var("CLAW_CONFIG_HOME", &config_home);
+        std::env::set_var("NINMU_CONFIG_HOME", &config_home);
         std::env::remove_var("RUSTY_CLAUDE_PERMISSION_MODE");
 
         let resolved = with_current_dir(&cwd, super::default_permission_mode);
 
         match original_config_home {
-            Some(value) => std::env::set_var("CLAW_CONFIG_HOME", value),
-            None => std::env::remove_var("CLAW_CONFIG_HOME"),
+            Some(value) => std::env::set_var("NINMU_CONFIG_HOME", value),
+            None => std::env::remove_var("NINMU_CONFIG_HOME"),
         }
         match original_permission_mode {
             Some(value) => std::env::set_var("RUSTY_CLAUDE_PERMISSION_MODE", value),
@@ -2801,24 +2801,24 @@ mod tests {
         let root = temp_dir();
         let cwd = root.join("project");
         let config_home = root.join("config-home");
-        std::fs::create_dir_all(cwd.join(".claw")).expect("project config dir should exist");
+        std::fs::create_dir_all(cwd.join(".ninmu")).expect("project config dir should exist");
         std::fs::create_dir_all(&config_home).expect("config home should exist");
         std::fs::write(
-            cwd.join(".claw").join("settings.json"),
+            cwd.join(".ninmu").join("settings.json"),
             r#"{"permissionMode":"acceptEdits"}"#,
         )
         .expect("project config should write");
 
-        let original_config_home = std::env::var("CLAW_CONFIG_HOME").ok();
+        let original_config_home = std::env::var("NINMU_CONFIG_HOME").ok();
         let original_permission_mode = std::env::var("RUSTY_CLAUDE_PERMISSION_MODE").ok();
-        std::env::set_var("CLAW_CONFIG_HOME", &config_home);
+        std::env::set_var("NINMU_CONFIG_HOME", &config_home);
         std::env::set_var("RUSTY_CLAUDE_PERMISSION_MODE", "read-only");
 
         let resolved = with_current_dir(&cwd, super::default_permission_mode);
 
         match original_config_home {
-            Some(value) => std::env::set_var("CLAW_CONFIG_HOME", value),
-            None => std::env::remove_var("CLAW_CONFIG_HOME"),
+            Some(value) => std::env::set_var("NINMU_CONFIG_HOME", value),
+            None => std::env::remove_var("NINMU_CONFIG_HOME"),
         }
         match original_permission_mode {
             Some(value) => std::env::set_var("RUSTY_CLAUDE_PERMISSION_MODE", value),
@@ -2835,10 +2835,10 @@ mod tests {
         let config_home = temp_dir();
         std::fs::create_dir_all(&config_home).expect("config home should exist");
 
-        let original_config_home = std::env::var("CLAW_CONFIG_HOME").ok();
+        let original_config_home = std::env::var("NINMU_CONFIG_HOME").ok();
         let original_api_key = std::env::var("ANTHROPIC_API_KEY").ok();
         let original_auth_token = std::env::var("ANTHROPIC_AUTH_TOKEN").ok();
-        std::env::set_var("CLAW_CONFIG_HOME", &config_home);
+        std::env::set_var("NINMU_CONFIG_HOME", &config_home);
         std::env::remove_var("ANTHROPIC_API_KEY");
         std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
 
@@ -2854,8 +2854,8 @@ mod tests {
             .expect_err("saved oauth should be ignored without env auth");
 
         match original_config_home {
-            Some(value) => std::env::set_var("CLAW_CONFIG_HOME", value),
-            None => std::env::remove_var("CLAW_CONFIG_HOME"),
+            Some(value) => std::env::set_var("NINMU_CONFIG_HOME", value),
+            None => std::env::remove_var("NINMU_CONFIG_HOME"),
         }
         match original_api_key {
             Some(value) => std::env::set_var("ANTHROPIC_API_KEY", value),
@@ -3075,16 +3075,16 @@ mod tests {
         let root = temp_dir();
         let cwd = root.join("project");
         let config_home = root.join("config-home");
-        std::fs::create_dir_all(cwd.join(".claw")).expect("project config dir should exist");
+        std::fs::create_dir_all(cwd.join(".ninmu")).expect("project config dir should exist");
         std::fs::create_dir_all(&config_home).expect("config home should exist");
         std::fs::write(
-            cwd.join(".claw").join("settings.json"),
+            cwd.join(".ninmu").join("settings.json"),
             r#"{"aliases":{"fast":"claude-haiku-4-5-20251213","smart":"opus","cheap":"grok-3-mini"}}"#,
         )
         .expect("project config should write");
 
-        let original_config_home = std::env::var("CLAW_CONFIG_HOME").ok();
-        std::env::set_var("CLAW_CONFIG_HOME", &config_home);
+        let original_config_home = std::env::var("NINMU_CONFIG_HOME").ok();
+        std::env::set_var("NINMU_CONFIG_HOME", &config_home);
 
         // when
         let direct = with_current_dir(&cwd, || resolve_model_alias_with_config("fast"));
@@ -3094,8 +3094,8 @@ mod tests {
         let builtin = with_current_dir(&cwd, || resolve_model_alias_with_config("haiku"));
 
         match original_config_home {
-            Some(value) => std::env::set_var("CLAW_CONFIG_HOME", value),
-            None => std::env::remove_var("CLAW_CONFIG_HOME"),
+            Some(value) => std::env::set_var("NINMU_CONFIG_HOME", value),
+            None => std::env::remove_var("NINMU_CONFIG_HOME"),
         }
         std::fs::remove_dir_all(root).expect("temp config root should clean up");
 
@@ -3632,7 +3632,7 @@ mod tests {
         std::fs::create_dir_all(&cwd).expect("project dir should exist");
         // One valid server + one malformed entry missing `command`.
         std::fs::write(
-            cwd.join(".claw.json"),
+            cwd.join(".ninmu.json"),
             r#"{
   "mcpServers": {
     "everything": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-everything"]},
@@ -3641,7 +3641,7 @@ mod tests {
 }
 "#,
         )
-        .expect("write malformed .claw.json");
+        .expect("write malformed .ninmu.json");
 
         let context = with_current_dir(&cwd, || {
             super::status_context(None)
@@ -3732,7 +3732,7 @@ mod tests {
 
     #[test]
     fn state_error_surfaces_actionable_worker_commands_139() {
-        // #139: the error for missing `.claw/worker-state.json` must name
+        // #139: the error for missing `.ninmu/worker-state.json` must name
         // the concrete commands that produce worker state, otherwise claws
         // have no discoverable path from the error to a fix.
         let _guard = env_lock();
@@ -4468,7 +4468,7 @@ mod tests {
     #[test]
     fn punctuation_bearing_single_token_still_dispatches_to_prompt() {
         // #140: Guard against test pollution — isolate cwd + env so this test
-        // doesn't pick up a stale .claw/settings.json from other tests that
+        // doesn't pick up a stale .ninmu/settings.json from other tests that
         // may have set `permissionMode: acceptEdits` in a shared cwd.
         let _guard = env_lock();
         let root = temp_dir();
@@ -4722,7 +4722,7 @@ mod tests {
         assert!(help.contains("/agents"));
         assert!(help.contains("/skills"));
         assert!(help.contains("/exit"));
-        assert!(help.contains("Auto-save            .claw/sessions/<session-id>.jsonl"));
+        assert!(help.contains("Auto-save            .ninmu/sessions/<session-id>.jsonl"));
         assert!(help.contains("Resume latest        /resume latest"));
     }
 
@@ -4810,7 +4810,7 @@ mod tests {
         fs::create_dir_all(&root).expect("root dir");
         let config_home = root.join("config");
         fs::create_dir_all(&config_home).expect("config home dir");
-        std::env::set_var("CLAW_CONFIG_HOME", &config_home);
+        std::env::set_var("NINMU_CONFIG_HOME", &config_home);
         std::env::remove_var("ANTHROPIC_MODEL");
         std::env::set_var("ANTHROPIC_MODEL", "sonnet");
 
@@ -4819,7 +4819,7 @@ mod tests {
         assert_eq!(resolved, "claude-sonnet-4-6");
 
         std::env::remove_var("ANTHROPIC_MODEL");
-        std::env::remove_var("CLAW_CONFIG_HOME");
+        std::env::remove_var("NINMU_CONFIG_HOME");
         fs::remove_dir_all(root).expect("cleanup temp dir");
     }
 
@@ -4830,14 +4830,14 @@ mod tests {
         fs::create_dir_all(&root).expect("root dir");
         let config_home = root.join("config");
         fs::create_dir_all(&config_home).expect("config home dir");
-        std::env::set_var("CLAW_CONFIG_HOME", &config_home);
+        std::env::set_var("NINMU_CONFIG_HOME", &config_home);
         std::env::remove_var("ANTHROPIC_MODEL");
 
         let resolved = with_current_dir(&root, || resolve_repl_model(DEFAULT_MODEL.to_string()));
 
         assert_eq!(resolved, DEFAULT_MODEL);
 
-        std::env::remove_var("CLAW_CONFIG_HOME");
+        std::env::remove_var("NINMU_CONFIG_HOME");
         fs::remove_dir_all(root).expect("cleanup temp dir");
     }
 
@@ -5346,7 +5346,7 @@ UU conflicted.rs",
         let handle = create_managed_session_handle("session-alpha").expect("jsonl handle");
         assert!(handle.path.ends_with("session-alpha.jsonl"));
 
-        let legacy_path = workspace.join(".claw/sessions/legacy.json");
+        let legacy_path = workspace.join(".ninmu/sessions/legacy.json");
         std::fs::create_dir_all(
             legacy_path
                 .parent()
@@ -5417,7 +5417,7 @@ UU conflicted.rs",
         let previous = std::env::current_dir().expect("cwd");
         std::env::set_current_dir(&workspace_b).expect("switch cwd");
 
-        let session_path = workspace_a.join(".claw/sessions/legacy-cross.jsonl");
+        let session_path = workspace_a.join(".ninmu/sessions/legacy-cross.jsonl");
         std::fs::create_dir_all(
             session_path
                 .parent()
@@ -5474,7 +5474,7 @@ UU conflicted.rs",
     fn resume_usage_mentions_latest_shortcut() {
         let usage = render_resume_usage();
         assert!(usage.contains("/resume <session-path|session-id|latest>"));
-        assert!(usage.contains(".claw/sessions/<session-id>.jsonl"));
+        assert!(usage.contains(".ninmu/sessions/<session-id>.jsonl"));
         assert!(usage.contains("/session list"));
     }
 

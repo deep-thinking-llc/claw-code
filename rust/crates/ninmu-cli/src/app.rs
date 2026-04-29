@@ -3195,14 +3195,14 @@ fn run_repl_standard(cli: &mut LiveCli) -> Result<(), Box<dyn std::error::Error>
 /// the default on the next launch.
 fn persist_model_to_settings(model: &str) -> Result<(), String> {
     use std::path::Path;
-    let config_home = std::env::var("CLAW_CONFIG_HOME")
+    let config_home = std::env::var("NINMU_CONFIG_HOME")
         .ok()
         .map(std::path::PathBuf::from)
         .filter(|p| p.is_absolute())
         .unwrap_or_else(|| {
             std::env::var("HOME").map_or_else(
                 |_| Path::new(".").to_path_buf(),
-                |h| Path::new(&h).join(".claw"),
+                |h| Path::new(&h).join(".ninmu"),
             )
         });
     let settings_path = config_home.join("settings.json");

@@ -500,7 +500,7 @@ pub(crate) fn parse_args(args: &[String]) -> Result<CliAction, String> {
             })
         }
         // #146: `config` is pure-local read-only introspection (merges
-        // `.claw.json` + `.claw/settings.json` from disk, no network, no
+        // `.ninmu.json` + `.ninmu/settings.json` from disk, no network, no
         // state mutation). Previously callers had to spin up a session with
         // `ninmu --resume SESSION.jsonl /config` to see their own config,
         // which is synthetic friction. Accepts an optional section name

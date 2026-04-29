@@ -27,7 +27,7 @@ pub(crate) struct StatusContext {
     pub(crate) git_branch: Option<String>,
     pub(crate) git_summary: GitWorkspaceSummary,
     pub(crate) sandbox_status: SandboxStatus,
-    /// #143: when `.claw.json` (or another loaded config file) fails to parse,
+    /// #143: when `.ninmu.json` (or another loaded config file) fails to parse,
     /// we capture the parse error here and still populate every field that
     /// doesn't depend on runtime config (workspace, git, sandbox defaults,
     /// discovery counts). Top-level JSON output then reports
@@ -260,7 +260,7 @@ pub(crate) fn status_json_value(
             "session": context.session_path.as_ref().map_or_else(|| "live-repl".to_string(), |path| path.display().to_string()),
             "session_id": context.session_path.as_ref().and_then(|path| {
                 // Session files are named <session-id>.jsonl directly under
-                // .claw/sessions/. Extract the stem (drop the .jsonl extension).
+                // .ninmu/sessions/. Extract the stem (drop the .jsonl extension).
                 path.file_stem().map(|n| n.to_string_lossy().into_owned())
             }),
             "loaded_config_files": context.loaded_config_files,

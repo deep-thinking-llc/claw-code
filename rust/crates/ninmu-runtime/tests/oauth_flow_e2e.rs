@@ -38,9 +38,9 @@ where
 
     let dir = std::env::temp_dir().join(format!("oauth-e2e-{}", unique_id()));
     fs::create_dir_all(&dir).unwrap();
-    std::env::set_var("CLAW_CONFIG_HOME", &dir);
+    std::env::set_var("NINMU_CONFIG_HOME", &dir);
     let result = f(&dir);
-    std::env::remove_var("CLAW_CONFIG_HOME");
+    std::env::remove_var("NINMU_CONFIG_HOME");
     let _ = fs::remove_dir_all(&dir);
     drop(guard);
     result

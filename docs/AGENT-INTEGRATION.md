@@ -280,8 +280,8 @@ JSON-RPC over stdin/stdout for language-agnostic integration.
 
 ### File locations
 
-- User-level: `~/.claw/models.json`
-- Project-level: `.claw/models.json`
+- User-level: `~/.ninmu/models.json`
+- Project-level: `.ninmu/models.json`
 - Both are merged; project entries override same-key user entries
 
 ### Model lookup order

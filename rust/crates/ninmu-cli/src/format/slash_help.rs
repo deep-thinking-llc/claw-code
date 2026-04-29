@@ -153,7 +153,7 @@ pub(crate) fn render_repl_help() -> String {
         "  Tab                  Complete commands, modes, and recent sessions".to_string(),
         "  Ctrl-C               Clear input (or exit on empty prompt)".to_string(),
         "  Shift+Enter/Ctrl+J   Insert a newline".to_string(),
-        "  Auto-save            .claw/sessions/<session-id>.jsonl".to_string(),
+        "  Auto-save            .ninmu/sessions/<session-id>.jsonl".to_string(),
         "  Resume latest        /resume latest".to_string(),
         "  Browse sessions      /session list".to_string(),
         "  Show prompt history  /history [count]".to_string(),
@@ -199,14 +199,14 @@ pub(crate) fn render_help_topic(topic: LocalHelpTopic) -> String {
             .to_string(),
         LocalHelpTopic::Init => "Init
   Usage            ninmu init [--output-format <format>]
-  Purpose          create .claw/, .claw.json, .gitignore, and CLAUDE.md in the current project
+  Purpose          create .ninmu/, .ninmu.json, .gitignore, and CLAUDE.md in the current project
   Output           list of created vs. skipped files (idempotent: safe to re-run)
   Formats          text (default), json
   Related          ninmu status · ninmu doctor"
             .to_string(),
         LocalHelpTopic::State => "State
   Usage            ninmu state [--output-format <format>]
-  Purpose          read .claw/worker-state.json written by the interactive REPL or a one-shot prompt
+  Purpose          read .ninmu/worker-state.json written by the interactive REPL or a one-shot prompt
   Output           worker id, model, permissions, session reference (text or json)
   Formats          text (default), json
   Produces state   `ninmu` (interactive REPL) or `ninmu prompt <text>` (one non-interactive turn)
@@ -217,7 +217,7 @@ pub(crate) fn render_help_topic(topic: LocalHelpTopic) -> String {
         LocalHelpTopic::Export => "Export
   Usage            ninmu export [--session <id|latest>] [--output <path>] [--output-format <format>]
   Purpose          serialize a managed session to JSON for review, transfer, or archival
-  Defaults         --session latest (most recent managed session in .claw/sessions/)
+  Defaults         --session latest (most recent managed session in .ninmu/sessions/)
   Formats          text (default), json
   Related          /session list · ninmu --resume latest"
             .to_string(),
@@ -376,7 +376,7 @@ pub(crate) fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     writeln!(out, "Session shortcuts:")?;
     writeln!(
         out,
-        "  REPL turns auto-save to .claw/sessions/<session-id>.{PRIMARY_SESSION_EXTENSION}"
+        "  REPL turns auto-save to .ninmu/sessions/<session-id>.{PRIMARY_SESSION_EXTENSION}"
     )?;
     writeln!(
         out,

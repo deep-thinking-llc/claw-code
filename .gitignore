@@ -1,15 +1,15 @@
 __pycache__/
 archive/
 .omx/
-.clawd-agents/
+.nimmud-agents/
 # Claude Code local artifacts
 .claude/settings.local.json
 .claude/sessions/
 # Ninmu Code local artifacts
-.claw/settings.local.json
-.claw/sessions/
+.ninmu/settings.local.json
+.ninmu/sessions/
 .port_sessions/
-.clawhip/
+.ninmuhip/
 status-help.txt
 DESIGN.md
 # WIP design and implementation docs (drop the _ prefix to commit)

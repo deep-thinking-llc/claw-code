@@ -9,7 +9,11 @@ const STARTER_CLAW_JSON: &str = concat!(
     "}\n",
 );
 const GITIGNORE_COMMENT: &str = "# Ninmu Code local artifacts";
-const GITIGNORE_ENTRIES: [&str; 3] = [".claw/settings.local.json", ".claw/sessions/", ".clawhip/"];
+const GITIGNORE_ENTRIES: [&str; 3] = [
+    ".ninmu/settings.local.json",
+    ".ninmu/sessions/",
+    ".ninmuhip/",
+];
 
 /// Template `.env.example` written by `ninmu init` so users can copy to `.env`
 /// and uncomment the provider they want to use.
@@ -164,15 +168,15 @@ struct RepoDetection {
 pub(crate) fn initialize_repo(cwd: &Path) -> Result<InitReport, Box<dyn std::error::Error>> {
     let mut artifacts = Vec::new();
 
-    let claw_dir = cwd.join(".claw");
+    let claw_dir = cwd.join(".ninmu");
     artifacts.push(InitArtifact {
-        name: ".claw/",
+        name: ".ninmu/",
         status: ensure_dir(&claw_dir)?,
     });
 
-    let claw_json = cwd.join(".claw.json");
+    let claw_json = cwd.join(".ninmu.json");
     artifacts.push(InitArtifact {
-        name: ".claw.json",
+        name: ".ninmu.json",
         status: write_file_if_missing(&claw_json, STARTER_CLAW_JSON)?,
     });
 
@@ -299,7 +303,7 @@ pub(crate) fn render_init_claude_md(cwd: &Path) -> String {
 
     lines.push("## Working agreement".to_string());
     lines.push("- Prefer small, reviewable changes and keep generated bootstrap files aligned with actual repo workflows.".to_string());
-    lines.push("- Keep shared defaults in `.claw.json`; reserve `.claw/settings.local.json` for machine-local overrides.".to_string());
+    lines.push("- Keep shared defaults in `.ninmu.json`; reserve `.ninmu/settings.local.json` for machine-local overrides.".to_string());
     lines.push("- Do not overwrite existing `CLAUDE.md` content automatically; update it intentionally when repo workflows change.".to_string());
     lines.push(String::new());
 
@@ -444,16 +448,16 @@ mod tests {
 
         let report = initialize_repo(&root).expect("init should succeed");
         let rendered = report.render();
-        assert!(rendered.contains(".claw/"));
-        assert!(rendered.contains(".claw.json"));
+        assert!(rendered.contains(".ninmu/"));
+        assert!(rendered.contains(".ninmu.json"));
         assert!(rendered.contains("created"));
         assert!(rendered.contains(".gitignore       created"));
         assert!(rendered.contains("CLAUDE.md        created"));
-        assert!(root.join(".claw").is_dir());
-        assert!(root.join(".claw.json").is_file());
+        assert!(root.join(".ninmu").is_dir());
+        assert!(root.join(".ninmu.json").is_file());
         assert!(root.join("CLAUDE.md").is_file());
         assert_eq!(
-            fs::read_to_string(root.join(".claw.json")).expect("read ninmu json"),
+            fs::read_to_string(root.join(".ninmu.json")).expect("read ninmu json"),
             concat!(
                 "{\n",
                 "  \"permissions\": {\n",
@@ -463,9 +467,9 @@ mod tests {
             )
         );
         let gitignore = fs::read_to_string(root.join(".gitignore")).expect("read gitignore");
-        assert!(gitignore.contains(".claw/settings.local.json"));
-        assert!(gitignore.contains(".claw/sessions/"));
-        assert!(gitignore.contains(".clawhip/"));
+        assert!(gitignore.contains(".ninmu/settings.local.json"));
+        assert!(gitignore.contains(".ninmu/sessions/"));
+        assert!(gitignore.contains(".ninmuhip/"));
         let claude_md = fs::read_to_string(root.join("CLAUDE.md")).expect("read claude md");
         assert!(claude_md.contains("Languages: Rust."));
         assert!(claude_md.contains("cargo clippy --workspace --all-targets -- -D warnings"));
@@ -478,7 +482,8 @@ mod tests {
         let root = temp_dir();
         fs::create_dir_all(&root).expect("create root");
         fs::write(root.join("CLAUDE.md"), "custom guidance\n").expect("write existing claude md");
-        fs::write(root.join(".gitignore"), ".claw/settings.local.json\n").expect("write gitignore");
+        fs::write(root.join(".gitignore"), ".ninmu/settings.local.json\n")
+            .expect("write gitignore");
 
         let first = initialize_repo(&root).expect("first init should succeed");
         assert!(first
@@ -486,8 +491,8 @@ mod tests {
             .contains("CLAUDE.md        skipped (already exists)"));
         let second = initialize_repo(&root).expect("second init should succeed");
         let second_rendered = second.render();
-        assert!(second_rendered.contains(".claw/"));
-        assert!(second_rendered.contains(".claw.json"));
+        assert!(second_rendered.contains(".ninmu/"));
+        assert!(second_rendered.contains(".ninmu.json"));
         assert!(second_rendered.contains("skipped (already exists)"));
         assert!(second_rendered.contains(".gitignore       skipped (already exists)"));
         assert!(second_rendered.contains("CLAUDE.md        skipped (already exists)"));
@@ -496,9 +501,9 @@ mod tests {
             "custom guidance\n"
         );
         let gitignore = fs::read_to_string(root.join(".gitignore")).expect("read gitignore");
-        assert_eq!(gitignore.matches(".claw/settings.local.json").count(), 1);
-        assert_eq!(gitignore.matches(".claw/sessions/").count(), 1);
-        assert_eq!(gitignore.matches(".clawhip/").count(), 1);
+        assert_eq!(gitignore.matches(".ninmu/settings.local.json").count(), 1);
+        assert_eq!(gitignore.matches(".ninmu/sessions/").count(), 1);
+        assert_eq!(gitignore.matches(".ninmuhip/").count(), 1);
 
         fs::remove_dir_all(root).expect("cleanup temp dir");
     }
@@ -516,8 +521,8 @@ mod tests {
         assert_eq!(
             created_names,
             vec![
-                ".claw/".to_string(),
-                ".claw.json".to_string(),
+                ".ninmu/".to_string(),
+                ".ninmu.json".to_string(),
                 ".gitignore".to_string(),
                 "CLAUDE.md".to_string(),
                 ".env.example".to_string(),
@@ -534,8 +539,8 @@ mod tests {
         assert_eq!(
             skipped_names,
             vec![
-                ".claw/".to_string(),
-                ".claw.json".to_string(),
+                ".ninmu/".to_string(),
+                ".ninmu.json".to_string(),
                 ".gitignore".to_string(),
                 "CLAUDE.md".to_string(),
                 ".env.example".to_string(),

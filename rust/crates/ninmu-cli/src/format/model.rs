@@ -16,7 +16,7 @@ pub(crate) enum ModelSource {
     Flag,
     /// `ANTHROPIC_MODEL` environment variable (when no flag was passed).
     Env,
-    /// `model` key in `.claw.json` / `.claw/settings.json` (when neither
+    /// `model` key in `.ninmu.json` / `.ninmu/settings.json` (when neither
     /// flag nor env set it).
     Config,
     /// Compiled-in `DEFAULT_MODEL` fallback.
