@@ -1,0 +1,25 @@
+{
+  "agentId": "agent-1777317068406810000",
+  "name": "verify-the-branch",
+  "description": "Verify the branch",
+  "subagentType": "Explore",
+  "model": "claude-opus-4-6",
+  "status": "running",
+  "outputFile": "/Users/jonathanconway/Projects/claw-code/rust/.clawd-agents/agent-1777317068406810000.md",
+  "manifestFile": "/Users/jonathanconway/Projects/claw-code/rust/.clawd-agents/agent-1777317068406810000.json",
+  "createdAt": "1777317068",
+  "startedAt": "1777317068",
+  "laneEvents": [
+    {
+      "event": "lane.started",
+      "status": "running",
+      "emittedAt": "1777317068",
+      "metadata": {
+        "seq": 0,
+        "provenance": "live_lane",
+        "timestamp_ms": 1777317068547
+      }
+    }
+  ],
+  "derivedState": "working"
+}

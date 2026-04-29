@@ -1,0 +1,25 @@
+{
+  "agentId": "agent-1777143728903311000",
+  "name": "ship-audit",
+  "description": "Review the branch",
+  "subagentType": "general-purpose",
+  "model": "claude-opus-4-6",
+  "status": "running",
+  "outputFile": "/Users/jonathanconway/Projects/claw-code/rust/.clawd-agents/agent-1777143728903311000.md",
+  "manifestFile": "/Users/jonathanconway/Projects/claw-code/rust/.clawd-agents/agent-1777143728903311000.json",
+  "createdAt": "1777143728",
+  "startedAt": "1777143728",
+  "laneEvents": [
+    {
+      "event": "lane.started",
+      "status": "running",
+      "emittedAt": "1777143729",
+      "metadata": {
+        "seq": 0,
+        "provenance": "live_lane",
+        "timestamp_ms": 1777143729027
+      }
+    }
+  ],
+  "derivedState": "working"
+}

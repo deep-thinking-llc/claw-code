@@ -1,0 +1,55 @@
+{
+  "agentId": "agent-1777226706499297000",
+  "name": "verify-the-branch",
+  "description": "Verify the branch",
+  "subagentType": "Explore",
+  "model": "claude-opus-4-6",
+  "status": "failed",
+  "outputFile": "/Users/jonathanconway/Projects/claw-code/rust/.clawd-agents/agent-1777226706499297000.md",
+  "manifestFile": "/Users/jonathanconway/Projects/claw-code/rust/.clawd-agents/agent-1777226706499297000.json",
+  "createdAt": "1777226706",
+  "startedAt": "1777226706",
+  "completedAt": "1777226706",
+  "laneEvents": [
+    {
+      "event": "lane.started",
+      "status": "running",
+      "emittedAt": "1777226706",
+      "metadata": {
+        "seq": 0,
+        "provenance": "live_lane",
+        "timestamp_ms": 1777226706645
+      }
+    },
+    {
+      "event": "lane.blocked",
+      "status": "blocked",
+      "emittedAt": "1777226706",
+      "failureClass": "infra",
+      "detail": "context_window_blocked for claude-opus-4-6: estimated input 238505 + requested output 32000 = 270505 tokens exceeds the 200000-token context window; compact the session or reduce request size before retrying",
+      "metadata": {
+        "seq": 0,
+        "provenance": "live_lane",
+        "timestamp_ms": 1777226706672
+      }
+    },
+    {
+      "event": "lane.failed",
+      "status": "failed",
+      "emittedAt": "1777226706",
+      "failureClass": "infra",
+      "detail": "context_window_blocked for claude-opus-4-6: estimated input 238505 + requested output 32000 = 270505 tokens exceeds the 200000-token context window; compact the session or reduce request size before retrying",
+      "metadata": {
+        "seq": 0,
+        "provenance": "live_lane",
+        "timestamp_ms": 1777226706672
+      }
+    }
+  ],
+  "currentBlocker": {
+    "failureClass": "infra",
+    "detail": "context_window_blocked for claude-opus-4-6: estimated input 238505 + requested output 32000 = 270505 tokens exceeds the 200000-token context window; compact the session or reduce request size before retrying"
+  },
+  "derivedState": "truly_idle",
+  "error": "context_window_blocked for claude-opus-4-6: estimated input 238505 + requested output 32000 = 270505 tokens exceeds the 200000-token context window; compact the session or reduce request size before retrying"
+}
