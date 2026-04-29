@@ -21,6 +21,7 @@ pub use prompt_cache::{
 pub use providers::anthropic::{
     inject_prompt_cache_control, AnthropicClient, AnthropicClient as ApiClient, AuthSource,
 };
+pub use providers::models_dev::{self as models_dev, cached_models, refresh_models, refresh_models_async};
 pub use providers::models_file::{
     self as models_file, clear_custom_models, discover_and_load_models, find_custom_model,
     load_custom_models, ModelsFile, ResolvedCustomModel,

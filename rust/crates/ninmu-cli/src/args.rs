@@ -125,6 +125,10 @@ pub(crate) enum CliAction {
     Init {
         output_format: CliOutputFormat,
     },
+    /// Fetch latest model metadata from models.dev.
+    ModelsRefresh {
+        output_format: CliOutputFormat,
+    },
     // #146: `ninmu config` and `ninmu diff` are pure-local read-only
     // introspection commands; wire them as standalone CLI subcommands.
     Config {
@@ -147,6 +151,7 @@ pub(crate) enum CliAction {
         reasoning_effort: Option<String>,
         allow_broad_cwd: bool,
         tui: bool,
+        models_refresh: bool,
     },
     HelpTopic(crate::format::LocalHelpTopic),
     // prompt-mode formatting is only supported for non-interactive runs
@@ -187,6 +192,7 @@ pub(crate) fn parse_args(args: &[String]) -> Result<CliAction, String> {
     let mut allowed_tool_values = Vec::new();
     let mut compact = false;
     let mut tui = false;
+    let mut models_refresh = false;
     let mut base_commit: Option<String> = None;
     let mut reasoning_effort: Option<String> = None;
     let mut allow_broad_cwd = false;
@@ -282,6 +288,10 @@ pub(crate) fn parse_args(args: &[String]) -> Result<CliAction, String> {
             }
             "--tui" => {
                 tui = true;
+                index += 1;
+            }
+            "--models-refresh" => {
+                models_refresh = true;
                 index += 1;
             }
             "--mode" => {
@@ -444,6 +454,7 @@ pub(crate) fn parse_args(args: &[String]) -> Result<CliAction, String> {
             reasoning_effort: reasoning_effort.clone(),
             allow_broad_cwd,
             tui,
+            models_refresh,
         });
     }
     if rest.first().map(String::as_str) == Some("--resume") {
@@ -555,6 +566,7 @@ pub(crate) fn parse_args(args: &[String]) -> Result<CliAction, String> {
         "acp" => parse_acp_args(&rest[1..], output_format),
         "login" | "logout" => Err(removed_auth_surface_error(rest[0].as_str())),
         "init" => Ok(CliAction::Init { output_format }),
+        "models-refresh" => Ok(CliAction::ModelsRefresh { output_format }),
         "export" => parse_export_args(&rest[1..], output_format),
         "prompt" => {
             let prompt = rest[1..].join(" ");

@@ -6,6 +6,7 @@ use crate::error::ApiError;
 use crate::types::MessageRequest;
 
 pub mod anthropic;
+pub mod models_dev;
 pub mod models_file;
 pub mod openai_compat;
 
@@ -226,7 +227,7 @@ pub fn has_auth_for_provider(provider: ProviderKind) -> bool {
     MODEL_REGISTRY
         .iter()
         .find(|(_, meta)| meta.provider == provider)
-        .map_or(false, |(_, meta)| std::env::var(meta.auth_env).is_ok())
+        .is_some_and(|(_, meta)| std::env::var(meta.auth_env).is_ok())
 }
 
 /// Returns all registered model entries (from `MODEL_REGISTRY`) plus any
@@ -255,13 +256,22 @@ pub fn list_available_models() -> Vec<ModelEntry> {
                 let has_auth = MODEL_REGISTRY
                     .iter()
                     .find(|(_, meta)| meta.provider == provider)
-                    .map_or(true, |(_, meta)| std::env::var(meta.auth_env).is_ok());
+                    .is_none_or(|(_, meta)| std::env::var(meta.auth_env).is_ok());
                 entries.push(ModelEntry {
                     alias: model.model_id.clone(),
                     canonical: model.model_id,
                     provider,
                     has_auth,
                 });
+            }
+        }
+    }
+    // Append cached models.dev entries (lowest priority, only for providers
+    // we support). Deduplicated by canonical name.
+    if let Some(remote) = models_dev::cached_models() {
+        for entry in &remote {
+            if seen.insert(entry.canonical.clone()) {
+                entries.push(entry.clone());
             }
         }
     }

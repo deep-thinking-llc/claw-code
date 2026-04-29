@@ -359,6 +359,32 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         CliAction::Acp { output_format } => print_acp_status(output_format)?,
         CliAction::State { output_format } => run_worker_state(output_format)?,
         CliAction::Init { output_format } => run_init(output_format)?,
+        CliAction::ModelsRefresh { output_format } => {
+            match ninmu_api::models_dev::refresh_models() {
+                Ok(count) => match output_format {
+                    CliOutputFormat::Text => {
+                        eprintln!("ok  {count} models loaded from models.dev");
+                    }
+                    CliOutputFormat::Json => {
+                        println!(
+                            r#"{{"status":"ok","count":{count}}}"#
+                        );
+                    }
+                },
+                Err(e) => match output_format {
+                    CliOutputFormat::Text => {
+                        eprintln!("fail  {e}");
+                        std::process::exit(1);
+                    }
+                    CliOutputFormat::Json => {
+                        println!(
+                            r#"{{"status":"error","message":"{e}"}}"#
+                        );
+                        std::process::exit(1);
+                    }
+                },
+            }
+        },
         // #146: dispatch pure-local introspection. Text mode uses existing
         // render_config_report/render_diff_report; JSON mode uses the
         // corresponding _json helpers already exposed for resume sessions.
@@ -401,6 +427,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             reasoning_effort,
             allow_broad_cwd,
             tui,
+            models_refresh,
         } => run_repl(
             model,
             allowed_tools,
@@ -439,6 +466,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
     let mut reasoning_effort: Option<String> = None;
     let mut allow_broad_cwd = false;
     let mut tui = false;
+    let mut models_refresh = false;
     let mut rest: Vec<String> = Vec::new();
     let mut index = 0;
 
@@ -527,6 +555,10 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             }
             "--tui" => {
                 tui = true;
+                index += 1;
+            }
+            "--models-refresh" => {
+                models_refresh = true;
                 index += 1;
             }
             "--base-commit" => {
@@ -670,6 +702,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             reasoning_effort: reasoning_effort.clone(),
             allow_broad_cwd,
             tui,
+            models_refresh,
         });
     }
     if rest.first().map(String::as_str) == Some("--resume") {
@@ -2757,6 +2790,7 @@ mod tests {
                 reasoning_effort: None,
                 allow_broad_cwd: false,
                 tui: false,
+                models_refresh: false,
             }
         );
     }
@@ -3136,6 +3170,7 @@ mod tests {
                 reasoning_effort: None,
                 allow_broad_cwd: false,
                 tui: false,
+                models_refresh: false,
             }
         );
     }
@@ -3158,6 +3193,7 @@ mod tests {
                 reasoning_effort: None,
                 allow_broad_cwd: false,
                 tui: false,
+                models_refresh: false,
             }
         );
     }
@@ -3216,6 +3252,7 @@ mod tests {
                 reasoning_effort: None,
                 allow_broad_cwd: false,
                 tui: false,
+                models_refresh: false,
             }
         );
     }
