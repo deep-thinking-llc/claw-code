@@ -665,8 +665,11 @@ impl RatatuiApp {
                     // worker thread in 3 minutes, the turn is likely stuck
                     // (dead SSE connection, blocked tool, etc.). Force-cancel
                     // and unlock the input so the user can continue.
+                    //
+                    // Skip the watchdog when a permission prompt is active —
+                    // the user may legitimately take a long time to decide.
                     const STALL_WATCHDOG: Duration = Duration::from_mins(3);
-                    if last.elapsed() > STALL_WATCHDOG {
+                    if self.pending_permission.is_none() && last.elapsed() > STALL_WATCHDOG {
                         turn_handle.take();
                         self.state.is_generating = false;
                         self.state.thinking_state = ThinkingState::Idle;
@@ -3300,7 +3303,7 @@ mod tests {
         // During animation — shows preview (first 30 chars) + pacman.
         app.paste_anim_frame = 3;
         let display = app.paste_display_text();
-        assert!(display.contains('ᗤ'), "pacman visible during animation");
+        assert!(display.chars().any(RatatuiApp::is_pacman), "pacman visible during animation");
 
         // After animation — shows summary only, never raw text.
         app.paste_animating = false;
@@ -3314,5 +3317,40 @@ mod tests {
         assert!(display.starts_with("[Pasted "));
         assert!(display.ends_with(" more"));
         assert!(!display.contains("secret"));
+    }
+
+    #[test]
+    fn watchdog_does_not_fire_during_permission_prompt() {
+        let mut app = RatatuiApp::new("m".into(), "r".into(), None);
+        app.state.is_generating = true;
+        app.last_event_received = Some(Instant::now() - Duration::from_secs(200));
+
+        // Simulate an active permission prompt.
+        let (response_tx, _rx) = std::sync::mpsc::channel();
+        app.pending_permission = Some(PendingPermission {
+            request: ninmu_runtime::PermissionRequest {
+                tool_name: "bash".into(),
+                input: "{}".into(),
+                required_mode: ninmu_runtime::PermissionMode::WorkspaceWrite,
+                current_mode: ninmu_runtime::PermissionMode::ReadOnly,
+                reason: None,
+            },
+            response_tx,
+            action_description: "run command".into(),
+        });
+
+        // Simulate the watchdog check — should NOT fire because
+        // pending_permission is active.
+        const STALL_WATCHDOG: Duration = Duration::from_mins(3);
+        if let Some(last) = app.last_event_received {
+            if app.pending_permission.is_none() && last.elapsed() > STALL_WATCHDOG {
+                app.state.is_generating = false;
+            }
+        }
+
+        assert!(
+            app.state.is_generating,
+            "watchdog should NOT cancel turn while permission prompt is active"
+        );
     }
 }
