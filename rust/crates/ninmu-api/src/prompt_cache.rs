@@ -110,6 +110,7 @@ pub struct PromptCacheRecord {
 #[derive(Debug, Clone)]
 pub struct PromptCache {
     inner: Arc<Mutex<PromptCacheInner>>,
+    lock_file: Arc<std::fs::File>,
 }
 
 impl PromptCache {
@@ -121,7 +122,7 @@ impl PromptCache {
     #[must_use]
     pub fn with_config(config: PromptCacheConfig) -> Self {
         let paths = PromptCachePaths::for_session(&config.session_id);
-        let lock_file = create_lock_file(&paths.lock_file_path);
+        let lock_file = Arc::new(create_lock_file(&paths.lock_file_path));
         lock_shared_with_timeout(&lock_file, Duration::from_secs(5));
         let _guard = FileLockGuard { file: &lock_file };
         let stats = read_json::<PromptCacheStats>(&paths.stats_path).unwrap_or_default();
@@ -132,8 +133,8 @@ impl PromptCache {
                 paths,
                 stats,
                 previous,
-                lock_file,
             })),
+            lock_file,
         }
     }
 
@@ -154,8 +155,8 @@ impl PromptCache {
         let entry_path = inner.paths.completion_entry_path(&request_hash);
         let ttl = inner.config.completion_ttl;
 
-        lock_exclusive_with_timeout(&inner.lock_file, Duration::from_secs(5));
-        let _guard = FileLockGuard { file: &inner.lock_file };
+        lock_exclusive_with_timeout(&self.lock_file, Duration::from_secs(5));
+        let _guard = FileLockGuard { file: &self.lock_file };
 
         let entry = read_json::<CompletionCacheEntry>(&entry_path);
         let Some(entry) = entry else {
@@ -236,8 +237,8 @@ impl PromptCache {
 
         inner.previous = Some(current);
 
-        lock_exclusive_with_timeout(&inner.lock_file, Duration::from_secs(5));
-        let _guard = FileLockGuard { file: &inner.lock_file };
+        lock_exclusive_with_timeout(&self.lock_file, Duration::from_secs(5));
+        let _guard = FileLockGuard { file: &self.lock_file };
 
         if let Some(response) = response {
             write_completion_entry(&inner.paths, &request_hash, response);
@@ -264,7 +265,6 @@ struct PromptCacheInner {
     paths: PromptCachePaths,
     stats: PromptCacheStats,
     previous: Option<TrackedPromptState>,
-    lock_file: std::fs::File,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -339,7 +339,7 @@ impl Drop for FileLockGuard<'_> {
 fn lock_exclusive_with_timeout(file: &std::fs::File, timeout: Duration) {
     let start = Instant::now();
     loop {
-        if fs2::FileExt::try_lock_exclusive(file).unwrap_or(false) {
+        if fs2::FileExt::try_lock_exclusive(file).is_ok() {
             break;
         }
         if start.elapsed() >= timeout {
@@ -354,7 +354,7 @@ fn lock_exclusive_with_timeout(file: &std::fs::File, timeout: Duration) {
 fn lock_shared_with_timeout(file: &std::fs::File, timeout: Duration) {
     let start = Instant::now();
     loop {
-        if fs2::FileExt::try_lock_shared(file).unwrap_or(false) {
+        if fs2::FileExt::try_lock_shared(file).is_ok() {
             break;
         }
         if start.elapsed() >= timeout {
