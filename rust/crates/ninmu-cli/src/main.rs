@@ -39,6 +39,7 @@ mod format;
 mod init;
 mod input;
 mod render;
+mod rpc_client;
 mod tui;
 
 // Re-exports from extracted format modules so existing code still compiles.
@@ -441,7 +442,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         CliAction::HelpTopic(topic) => print_help_topic(topic),
         CliAction::Help { output_format } => print_help(output_format)?,
         CliAction::Rpc => {
-            ninmu_sdk::run_rpc_server()?;
+            ninmu_sdk::run_rpc_server_with_factory(Some(Box::new(|| {
+                crate::rpc_client::RpcApiClient::new("claude-sonnet-4-6").map_or_else(
+                    |e| {
+                        eprintln!("Failed to create RPC API client: {e}");
+                        ninmu_sdk::BoxedApiClient::new(ninmu_sdk::DummyApiClient)
+                    },
+                    ninmu_sdk::BoxedApiClient::new,
+                )
+            })))?;
         }
     }
     Ok(())

@@ -116,7 +116,7 @@ pub use tool_registry::{
 };
 
 #[cfg(feature = "rpc")]
-pub use rpc::run_rpc_server;
+pub use rpc::{run_rpc_server, run_rpc_server_with_factory};
 
 // Re-export key runtime types for convenience
 pub use ninmu_runtime::{

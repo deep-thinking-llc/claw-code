@@ -9,7 +9,7 @@ use std::io::{self, BufRead, Write};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::session::AgentSession;
+use crate::session::{AgentSession, AgentSessionBuilder, BoxedApiClient};
 use crate::tool_registry::ToolRegistry;
 use crate::EventBus;
 use crate::SessionTree;
@@ -66,11 +66,21 @@ struct ManagedSession {
 // RPC server
 // ---------------------------------------------------------------------------
 
-/// Run the JSON-RPC server, reading from stdin and writing to stdout.
+/// Run the JSON-RPC server with a dummy API client (no real provider calls).
 pub fn run_rpc_server() -> Result<(), String> {
+    run_rpc_server_with_factory(None)
+}
+
+/// Run the JSON-RPC server with an optional API client factory.
+///
+/// When `factory` is provided, `session.create` will build sessions using
+/// real API clients instead of the dummy stub.
+pub fn run_rpc_server_with_factory(
+    factory: Option<Box<dyn Fn() -> BoxedApiClient + Send>>,
+) -> Result<(), String> {
     let stdin = io::stdin();
     let stdout = io::stdout();
-    let mut server = RpcServer::new(stdin.lock(), stdout.lock());
+    let mut server = RpcServer::new(stdin.lock(), stdout.lock(), factory);
     server.run()?;
     Ok(())
 }
@@ -80,15 +90,21 @@ struct RpcServer<R: BufRead, W: Write> {
     writer: W,
     sessions: HashMap<String, ManagedSession>,
     running: bool,
+    client_factory: Option<Box<dyn Fn() -> BoxedApiClient + Send>>,
 }
 
 impl<R: BufRead, W: Write> RpcServer<R, W> {
-    fn new(reader: R, writer: W) -> Self {
+    fn new(
+        reader: R,
+        writer: W,
+        client_factory: Option<Box<dyn Fn() -> BoxedApiClient + Send>>,
+    ) -> Self {
         Self {
             reader,
             writer,
             sessions: HashMap::new(),
             running: true,
+            client_factory,
         }
     }
 
@@ -171,12 +187,25 @@ impl<R: BufRead, W: Write> RpcServer<R, W> {
             })
             .unwrap_or_default();
 
-        let (session, event_bus) = AgentSession::new(
-            model,
-            system_prompt,
-            ToolRegistry::new(),
-            ninmu_runtime::PermissionMode::DangerFullAccess,
-        )?;
+        let (session, event_bus) = if let Some(ref factory) = self.client_factory {
+            let mut builder = AgentSessionBuilder::new()
+                .model(model)
+                .tools(ToolRegistry::new())
+                .permission_mode(ninmu_runtime::PermissionMode::DangerFullAccess)
+                .api_client(factory());
+            for line in &system_prompt {
+                let line: &String = line;
+                builder = builder.system_prompt(line.as_str());
+            }
+            builder.build()?
+        } else {
+            AgentSession::new(
+                model,
+                system_prompt,
+                ToolRegistry::new(),
+                ninmu_runtime::PermissionMode::DangerFullAccess,
+            )?
+        };
 
         let session_id = session.session_id().to_string();
 
@@ -478,7 +507,7 @@ mod tests {
         let reader = Cursor::new(input.as_bytes());
         let mut output = Cursor::new(Vec::new());
 
-        let mut server = RpcServer::new(reader, &mut output);
+        let mut server = RpcServer::new(reader, &mut output, None);
         server.run().expect("server should run");
 
         let output_str = String::from_utf8(output.into_inner()).expect("valid utf8");
@@ -499,7 +528,7 @@ mod tests {
         let reader = Cursor::new(input.as_bytes());
         let mut output = Cursor::new(Vec::new());
 
-        let mut server = RpcServer::new(reader, &mut output);
+        let mut server = RpcServer::new(reader, &mut output, None);
         server.run().expect("server should run");
 
         let output_str = String::from_utf8(output.into_inner()).expect("valid utf8");
@@ -538,7 +567,7 @@ mod tests {
         let reader = Cursor::new(input.as_bytes());
         let mut output = Cursor::new(Vec::new());
 
-        let mut server = RpcServer::new(reader, &mut output);
+        let mut server = RpcServer::new(reader, &mut output, None);
         server.run().expect("server should run");
 
         let output_str = String::from_utf8(output.into_inner()).expect("valid utf8");
@@ -570,7 +599,7 @@ mod tests {
         let reader = Cursor::new(input.as_bytes());
         let mut output = Cursor::new(Vec::new());
 
-        let mut server = RpcServer::new(reader, &mut output);
+        let mut server = RpcServer::new(reader, &mut output, None);
         server.run().expect("server should run");
         assert!(!server.running);
 
@@ -590,7 +619,7 @@ mod tests {
         let reader = Cursor::new(input.as_bytes());
         let mut output = Cursor::new(Vec::new());
 
-        let mut server = RpcServer::new(reader, &mut output);
+        let mut server = RpcServer::new(reader, &mut output, None);
         server.run().expect("server should run");
 
         let output_str = String::from_utf8(output.into_inner()).expect("valid utf8");
@@ -608,7 +637,7 @@ mod tests {
         let reader = Cursor::new(input.as_bytes());
         let mut output = Cursor::new(Vec::new());
 
-        let mut server = RpcServer::new(reader, &mut output);
+        let mut server = RpcServer::new(reader, &mut output, None);
         server.run().expect("server should run");
 
         let output_str = String::from_utf8(output.into_inner()).expect("valid utf8");
