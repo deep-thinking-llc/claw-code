@@ -28,6 +28,7 @@ use ratatui::Terminal;
 use crate::tui::event::{ThinkingState, TuiEvent, TuiSharedState};
 use crate::tui::permission::describe_tool_action;
 use crate::tui::scrollback::Scrollback;
+use ninmu_api::{model_token_limit, ModelTokenLimit};
 use ninmu_runtime::PromptCacheEvent;
 use ninmu_runtime::{
     ContentBlock, ConversationMessage, MessageRole, PermissionPromptDecision, PermissionRequest,
@@ -105,8 +106,6 @@ pub struct RatatuiApp {
     cached_header: Line<'static>,
     /// Cached input text (updated when input_buf changes).
     cached_input: String,
-    /// Cached token count string (updated on usage events).
-    cached_tokens_str: String,
     /// Cached elapsed-second display (updated when the second changes).
     cached_elapsed_str: String,
     /// Current reasoning effort level (None = default).
@@ -133,6 +132,10 @@ pub struct RatatuiApp {
     paste_summary: Option<String>,
     /// Characters typed by the user after a long paste (appended on submit).
     paste_suffix: Vec<char>,
+    /// Rapid-input detection: accumulates chars that arrive <20ms apart.
+    rapid_buf: String,
+    /// Timestamp of the last character key event (for rapid-input detection).
+    last_char_time: Option<Instant>,
 }
 
 /// A permission prompt waiting for the user to respond in the TUI.
@@ -187,7 +190,6 @@ impl RatatuiApp {
             dirty: true,
             cached_header: Line::default(),
             cached_input: String::new(),
-            cached_tokens_str: String::new(),
             cached_elapsed_str: String::new(),
             reasoning_effort: None,
             thinking_mode: None,
@@ -200,6 +202,8 @@ impl RatatuiApp {
             paste_anim_start: None,
             paste_summary: None,
             paste_suffix: Vec::new(),
+            rapid_buf: String::new(),
+            last_char_time: None,
         };
         app.cached_header = Self::build_header_line(
             &app.model,
@@ -513,6 +517,17 @@ impl RatatuiApp {
                             continue;
                         }
 
+                        // Flush any accumulated rapid-input buffer before handling
+                        // non-character keys (Enter, Backspace, arrows, etc.).
+                        if !matches!(
+                            key.code,
+                            KeyCode::Char(_)
+                                if key.modifiers.is_empty()
+                                    || key.modifiers == KeyModifiers::SHIFT
+                        ) {
+                            self.flush_rapid_buf();
+                        }
+
                         match key.code {
                             KeyCode::Enter
                                 if key.modifiers.contains(KeyModifiers::CONTROL)
@@ -577,12 +592,24 @@ impl RatatuiApp {
                                 if key.modifiers.is_empty()
                                     || key.modifiers == KeyModifiers::SHIFT =>
                             {
-                                if self.paste_summary.is_some() {
-                                    // Append to post-paste suffix, keep summary visible.
-                                    self.paste_suffix.push(c);
+                                let now = Instant::now();
+                                let is_rapid = self
+                                    .last_char_time
+                                    .is_some_and(|t| now.duration_since(t) < Self::RAPID_INPUT_GAP);
+                                self.last_char_time = Some(now);
+
+                                if is_rapid {
+                                    self.rapid_buf.push(c);
                                 } else {
-                                    self.input_buf.insert(self.cursor, c);
-                                    self.cursor += 1;
+                                    // Gap too long — flush any previous rapid buf,
+                                    // then handle this char normally.
+                                    self.flush_rapid_buf();
+                                    if self.paste_summary.is_some() {
+                                        self.paste_suffix.push(c);
+                                    } else {
+                                        self.input_buf.insert(self.cursor, c);
+                                        self.cursor += 1;
+                                    }
                                 }
                                 self.refresh_input_cache();
                             }
@@ -741,6 +768,16 @@ impl RatatuiApp {
                         }
                     }
                 }
+                // Flush rapid-input buffer if no new chars arrived recently.
+                if !self.rapid_buf.is_empty() {
+                    let flush_gap = Duration::from_millis(50);
+                    if self
+                        .last_char_time
+                        .is_some_and(|t| t.elapsed() >= flush_gap)
+                    {
+                        self.flush_rapid_buf();
+                    }
+                }
                 self.dirty = true;
             }
         }
@@ -751,7 +788,6 @@ impl RatatuiApp {
     }
 
     fn refresh_status_cache(&mut self) {
-        self.cached_tokens_str = format_tokens(self.usage.input_tokens + self.usage.output_tokens);
         self.cached_elapsed_str = self
             .turn_start
             .map(|t| format!("{}s", t.elapsed().as_secs()))
@@ -762,9 +798,32 @@ impl RatatuiApp {
     const PASTE_PREVIEW_LEN: usize = 30;
     const PASTE_ANIM_DURATION: Duration = Duration::from_millis(1200);
     const PACMAN_FRAMES: &[char] = &['C', '(', 'C', '('];
+    /// Max gap between key events to consider them part of a rapid burst (paste).
+    const RAPID_INPUT_GAP: Duration = Duration::from_millis(20);
+    /// Min chars in a rapid burst to treat it as a paste.
+    const RAPID_PASTE_MIN: usize = 10;
 
     fn is_pacman(ch: char) -> bool {
         ch == 'C' || ch == '('
+    }
+
+    fn flush_rapid_buf(&mut self) {
+        let buf = std::mem::take(&mut self.rapid_buf);
+        if buf.is_empty() {
+            return;
+        }
+        if buf.len() >= Self::RAPID_PASTE_MIN {
+            self.handle_paste(&buf);
+        } else if self.paste_summary.is_some() {
+            self.paste_suffix.extend(buf.chars());
+            self.refresh_input_cache();
+        } else {
+            for c in buf.chars() {
+                self.input_buf.insert(self.cursor, c);
+                self.cursor += 1;
+            }
+            self.refresh_input_cache();
+        }
     }
 
     fn handle_paste(&mut self, text: &str) {
@@ -889,6 +948,8 @@ impl RatatuiApp {
         self.paste_anim_start = None;
         self.paste_anim_frame = 0;
         self.paste_suffix.clear();
+        self.rapid_buf.clear();
+        self.last_char_time = None;
     }
 
     fn process_event(&mut self, ev: TuiEvent) {
@@ -1000,31 +1061,8 @@ impl RatatuiApp {
             }
             self.response_text.clear();
         }
-        let total_tokens = self.usage.input_tokens + self.usage.output_tokens;
-        if total_tokens > 0 {
-            let mut msg = format!(
-                "  {} in / {} out tokens",
-                self.usage.input_tokens, self.usage.output_tokens,
-            );
-            if let Some(pricing) = self.model_pricing {
-                let in_cost =
-                    (self.usage.input_tokens as f64 / 1_000_000.0) * pricing.input_cost_per_million;
-                let out_cost = (self.usage.output_tokens as f64 / 1_000_000.0)
-                    * pricing.output_cost_per_million;
-                let cache_create_cost = (self.usage.cache_creation_input_tokens as f64
-                    / 1_000_000.0)
-                    * pricing.cache_creation_cost_per_million;
-                let cache_read_cost = (self.usage.cache_read_input_tokens as f64 / 1_000_000.0)
-                    * pricing.cache_read_cost_per_million;
-                let total = in_cost + out_cost + cache_create_cost + cache_read_cost;
-                if total >= 0.0001 {
-                    let cost_str = format!("  \u{2022} ${total:.4}");
-                    msg.push_str(&cost_str);
-                }
-            }
-            self.scrollback.push(msg);
-            self.usage = TokenUsage::default();
-        }
+        // Token/cost display moved to the metadata bar below the input box.
+        // Do not append usage lines to the conversation scrollback.
     }
 
     fn update_streaming_display(&mut self) {
@@ -1097,6 +1135,7 @@ impl RatatuiApp {
                 Constraint::Length(1), // header
                 Constraint::Min(5),    // conversation
                 Constraint::Length(3), // input box
+                Constraint::Length(1), // metadata bar
                 Constraint::Length(1), // status bar
             ])
             .split(area);
@@ -1106,7 +1145,8 @@ impl RatatuiApp {
         self.last_conv_height = layout[1].height as usize;
         self.draw_conversation(frame, layout[1]);
         self.draw_input(frame, layout[2]);
-        self.draw_status(frame, layout[3]);
+        self.draw_metadata(frame, layout[3]);
+        self.draw_status(frame, layout[4]);
 
         if self.help_visible {
             self.draw_help_overlay(frame, area);
@@ -1412,6 +1452,59 @@ impl RatatuiApp {
         }
     }
 
+    fn draw_metadata(&self, frame: &mut ratatui::Frame, area: Rect) {
+        let mut spans = vec![Span::raw("  ")];
+
+        // Token counts
+        let in_tok = format_tokens(self.usage.input_tokens);
+        let out_tok = format_tokens(self.usage.output_tokens);
+        spans.push(Span::styled(
+            format!("{in_tok} in / {out_tok} out"),
+            Style::default().fg(TEXT_SEC),
+        ));
+        spans.push(Span::styled(" tokens", Style::default().fg(MUTED)));
+
+        // Cost estimate
+        if let Some(pricing) = self.model_pricing {
+            let in_cost =
+                (self.usage.input_tokens as f64 / 1_000_000.0) * pricing.input_cost_per_million;
+            let out_cost = (self.usage.output_tokens as f64 / 1_000_000.0)
+                * pricing.output_cost_per_million;
+            let cache_create_cost = (self.usage.cache_creation_input_tokens as f64 / 1_000_000.0)
+                * pricing.cache_creation_cost_per_million;
+            let cache_read_cost = (self.usage.cache_read_input_tokens as f64 / 1_000_000.0)
+                * pricing.cache_read_cost_per_million;
+            let total = in_cost + out_cost + cache_create_cost + cache_read_cost;
+            if total >= 0.0001 {
+                spans.push(Span::styled("  •  ", Style::default().fg(MUTED)));
+                spans.push(Span::styled(
+                    format!("${total:.4}"),
+                    Style::default().fg(TEXT_SEC),
+                ));
+            }
+        }
+
+        // Context-window percentage
+        if let Some(limit) = model_token_limit(&self.model) {
+            let total = self.usage.input_tokens + self.usage.output_tokens;
+            let pct = (total as f64 / limit.context_window_tokens as f64) * 100.0;
+            let pct_str = format!("{pct:.0}%");
+            let pct_color = if pct >= 90.0 {
+                ERROR_COLOR
+            } else if pct >= 70.0 {
+                Color::Rgb(255, 180, 60)
+            } else {
+                MUTED
+            };
+            spans.push(Span::styled("  •  ", Style::default().fg(MUTED)));
+            spans.push(Span::styled(pct_str, Style::default().fg(pct_color)));
+            spans.push(Span::styled(" context", Style::default().fg(MUTED)));
+        }
+
+        let meta = Paragraph::new(Line::from(spans)).style(Style::default().bg(SURFACE));
+        frame.render_widget(meta, area);
+    }
+
     fn draw_status(&self, frame: &mut ratatui::Frame, area: Rect) {
         let status_label = if self.state.is_generating {
             "streaming"
@@ -1427,23 +1520,17 @@ impl RatatuiApp {
         let mut spans = vec![
             Span::raw("  "),
             Span::styled(status_label, Style::default().fg(status_color)),
-            Span::raw("  "),
-            Span::styled("tokens ", Style::default().fg(MUTED)),
-            Span::styled(
-                self.cached_tokens_str.clone(),
-                Style::default().fg(TEXT_SEC),
-            ),
-            Span::raw("  "),
         ];
 
         if self.state.is_generating && !self.cached_elapsed_str.is_empty() {
+            spans.push(Span::raw("  "));
             spans.push(Span::styled(
                 self.cached_elapsed_str.clone(),
                 Style::default().fg(ACCENT),
             ));
-            spans.push(Span::raw("  "));
         }
 
+        spans.push(Span::raw("  "));
         spans.push(Span::styled("/help", Style::default().fg(MUTED)));
 
         let status = Paragraph::new(Line::from(spans)).style(Style::default().bg(SURFACE));
@@ -2036,7 +2123,7 @@ mod tests {
     }
 
     #[test]
-    fn flush_response_shows_usage_when_tokens_present() {
+    fn flush_response_does_not_show_usage_in_scrollback() {
         let mut app = RatatuiApp::new("m".into(), "r".into(), None);
         app.response_text.push_str("hello\n");
         app.usage = TokenUsage {
@@ -2049,8 +2136,8 @@ mod tests {
             .filter_map(|i| app.scrollback.visible(100).0.get(i).cloned())
             .collect();
         assert!(
-            lines.iter().any(|l| l.contains("100 in / 50 out tokens")),
-            "expected usage line in scrollback, got: {lines:?}"
+            !lines.iter().any(|l| l.contains("tokens")),
+            "usage should not appear in scrollback, got: {lines:?}"
         );
     }
 
@@ -2113,7 +2200,7 @@ mod tests {
     // -- Cost display tests -------------------------------------------------
 
     #[test]
-    fn flush_response_shows_cost_when_pricing_available() {
+    fn flush_response_does_not_show_cost_in_scrollback() {
         let mut app = RatatuiApp::new("claude-sonnet".into(), "write".into(), None);
         app.usage = TokenUsage {
             input_tokens: 1000,
@@ -2123,9 +2210,10 @@ mod tests {
         app.response_text = "Hello world".into();
         app.flush_response();
         let all = app.scrollback.visible(usize::MAX).0;
-        let usage_line = all.last().expect("usage line should exist");
-        assert!(usage_line.contains("1000 in / 200 out tokens"));
-        assert!(usage_line.contains('$'), "expected cost in: {usage_line}");
+        assert!(
+            !all.iter().any(|l| l.contains("tokens") || l.contains('$')),
+            "cost should not appear in scrollback, got: {all:?}"
+        );
     }
 
     // -- Input history tests ------------------------------------------------
@@ -2271,18 +2359,6 @@ mod tests {
         app.input_buf.pop();
         app.refresh_input_cache();
         assert_eq!(app.cached_input, "a");
-    }
-
-    #[test]
-    fn status_tokens_cached_on_usage() {
-        let mut app = RatatuiApp::new("m".into(), "r".into(), None);
-        app.usage = TokenUsage {
-            input_tokens: 1_500,
-            output_tokens: 300,
-            ..Default::default()
-        };
-        app.refresh_status_cache();
-        assert_eq!(app.cached_tokens_str, "1.8k");
     }
 
     #[test]
@@ -3182,6 +3258,8 @@ mod tests {
         let mut app = RatatuiApp::new("m".into(), "r".into(), None);
         app.handle_paste(&"a".repeat(200));
         app.paste_suffix.push('x');
+        app.rapid_buf = "test".to_string();
+        app.last_char_time = Some(Instant::now());
         assert!(app.pasted_text.is_some());
         assert!(app.paste_summary.is_some());
         app.clear_paste_state();
@@ -3191,6 +3269,8 @@ mod tests {
         assert!(app.paste_anim_start.is_none());
         assert_eq!(app.paste_anim_frame, 0);
         assert!(app.paste_suffix.is_empty());
+        assert!(app.rapid_buf.is_empty());
+        assert!(app.last_char_time.is_none());
     }
 
     #[test]
@@ -3583,5 +3663,156 @@ mod tests {
         assert!(submitted.starts_with(first));
         assert!(submitted.contains(second));
         assert!(submitted.ends_with(" done"));
+    }
+
+    #[test]
+    fn second_paste_during_animation_appends_correctly() {
+        let mut app = RatatuiApp::new("m".into(), "r".into(), None);
+        let first = format!("first chunk of text {}", "a".repeat(200));
+        let second = format!("second chunk of text {}", "b".repeat(200));
+
+        // First paste starts animation.
+        app.handle_paste(&first);
+        assert!(app.paste_animating);
+        assert_eq!(app.pasted_text.as_deref(), Some(first.as_str()));
+
+        // Animation is still running — paste again.
+        app.handle_paste(&second);
+
+        // Animation should have been cancelled, NOT restarted.
+        assert!(
+            !app.paste_animating,
+            "second paste during animation should cancel animation, not restart it"
+        );
+
+        // pasted_text should contain both pastes concatenated.
+        let combined = format!("{first}{second}");
+        assert_eq!(app.pasted_text.as_deref(), Some(combined.as_str()));
+
+        // Summary should reflect combined word/line counts.
+        let summary = app.paste_summary.as_ref().unwrap();
+        let words: usize = combined.split_whitespace().count();
+        let lines = combined.lines().count();
+        assert!(
+            summary.contains(&format!("{words} words")),
+            "summary should say '{words} words', got: {summary}"
+        );
+        assert!(
+            summary.contains(&format!("{lines} lines")),
+            "summary should say '{lines} lines', got: {summary}"
+        );
+
+        // Display should show the updated summary (not animation preview).
+        let display = app.paste_display_text();
+        assert!(
+            display.starts_with("[Pasted "),
+            "display should show summary, got: {display}"
+        );
+        assert!(
+            !display.contains(&second[..30]),
+            "display should NOT show raw second paste text"
+        );
+
+        // submit_text() should return the full combined text.
+        let submitted = app.submit_text();
+        assert_eq!(submitted, combined);
+    }
+
+    #[test]
+    fn third_paste_appends_to_combined() {
+        let mut app = RatatuiApp::new("m".into(), "r".into(), None);
+        let first = format!("aaa {}", "a".repeat(200));
+        let second = format!("bbb {}", "b".repeat(200));
+        let third = format!("ccc {}", "c".repeat(200));
+
+        app.handle_paste(&first);
+        app.paste_animating = false;
+        if let Some(ref summary) = app.paste_summary {
+            app.input_buf = summary.chars().collect();
+            app.refresh_input_cache();
+        }
+
+        app.handle_paste(&second);
+        app.handle_paste(&third);
+
+        let combined = format!("{first}{second}{third}");
+        assert_eq!(app.submit_text(), combined);
+        assert_eq!(app.pasted_text.as_deref(), Some(combined.as_str()));
+    }
+
+    #[test]
+    fn second_paste_preserves_existing_suffix() {
+        let mut app = RatatuiApp::new("m".into(), "r".into(), None);
+        let first = format!("first {}", "a".repeat(200));
+        let second = format!("second {}", "b".repeat(200));
+
+        app.handle_paste(&first);
+        app.paste_animating = false;
+        if let Some(ref summary) = app.paste_summary {
+            app.input_buf = summary.chars().collect();
+            app.refresh_input_cache();
+        }
+
+        // User types " typed" after first paste.
+        app.paste_suffix.extend(" typed".chars());
+
+        // Now pastes again — suffix should still be there.
+        app.handle_paste(&second);
+        assert_eq!(app.paste_suffix.iter().collect::<String>(), " typed");
+
+        // Submitted text should be first + second + " typed".
+        let submitted = app.submit_text();
+        assert_eq!(submitted, format!("{first}{second} typed"));
+    }
+
+    #[test]
+    fn rapid_buf_short_burst_goes_to_suffix_when_paste_active() {
+        let mut app = RatatuiApp::new("m".into(), "r".into(), None);
+        app.handle_paste(&"a".repeat(200));
+        app.paste_animating = false;
+        if let Some(ref summary) = app.paste_summary {
+            app.input_buf = summary.chars().collect();
+            app.refresh_input_cache();
+        }
+
+        // Simulate a short rapid burst (5 chars, below RAPID_PASTE_MIN of 10).
+        app.rapid_buf = "hello".to_string();
+        app.flush_rapid_buf();
+
+        // Should go to paste_suffix since it's below the threshold.
+        assert_eq!(app.paste_suffix.iter().collect::<String>(), "hello");
+        assert_eq!(app.pasted_text.as_ref().unwrap().len(), 200);
+    }
+
+    #[test]
+    fn rapid_buf_long_burst_treated_as_paste() {
+        let mut app = RatatuiApp::new("m".into(), "r".into(), None);
+        app.handle_paste(&"a".repeat(200));
+        app.paste_animating = false;
+        if let Some(ref summary) = app.paste_summary {
+            app.input_buf = summary.chars().collect();
+            app.refresh_input_cache();
+        }
+
+        // Simulate a long rapid burst (above RAPID_PASTE_MIN of 10).
+        let burst = "b".repeat(50);
+        app.rapid_buf = burst.clone();
+        app.flush_rapid_buf();
+
+        // Should be appended to pasted_text via handle_paste.
+        let expected = format!("{}{}", "a".repeat(200), burst);
+        assert_eq!(app.pasted_text.as_deref(), Some(expected.as_str()));
+    }
+
+    #[test]
+    fn rapid_buf_no_paste_goes_to_input_buf() {
+        let mut app = RatatuiApp::new("m".into(), "r".into(), None);
+
+        // No paste active — short burst goes to input_buf.
+        app.rapid_buf = "hello".to_string();
+        app.flush_rapid_buf();
+
+        assert_eq!(app.cached_input, "hello");
+        assert!(app.pasted_text.is_none());
     }
 }
