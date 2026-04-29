@@ -1067,7 +1067,8 @@ impl LiveCli {
         let (handle, session) = load_session_reference(&session_ref)?;
         let message_count = session.messages.len();
         let session_id = session.session_id.clone();
-        let runtime = build_runtime(
+        let shared_client = get_pooled_client(&self.client_pool, &self.model, &session_id);
+        let runtime = build_runtime_with_plugin_state(
             session,
             &handle.id,
             self.model.clone(),
@@ -1077,6 +1078,8 @@ impl LiveCli {
             self.allowed_tools.clone(),
             self.permission_mode,
             None,
+            self.runtime_plugin_state.clone(),
+            shared_client,
         )?;
         self.replace_runtime(runtime)?;
         self.session = SessionHandle {
