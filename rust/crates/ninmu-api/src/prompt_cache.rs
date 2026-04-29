@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -49,6 +49,7 @@ pub struct PromptCachePaths {
     pub completion_dir: PathBuf,
     pub session_state_path: PathBuf,
     pub stats_path: PathBuf,
+    pub lock_file_path: PathBuf,
 }
 
 impl PromptCachePaths {
@@ -61,6 +62,7 @@ impl PromptCachePaths {
             root,
             session_state_path: session_dir.join("session-state.json"),
             stats_path: session_dir.join("stats.json"),
+            lock_file_path: session_dir.join(".lock"),
             session_dir,
             completion_dir,
         }
@@ -255,6 +257,7 @@ struct PromptCacheInner {
     paths: PromptCachePaths,
     stats: PromptCacheStats,
     previous: Option<TrackedPromptState>,
+    lock_file: std::fs::File,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -308,6 +311,49 @@ impl RequestFingerprints {
             tools: hash_serializable(&request.tools),
             messages: hash_serializable(&request.messages),
         }
+    }
+}
+
+/// RAII guard that releases an advisory file lock on drop.
+struct FileLockGuard<'a> {
+    file: &'a std::fs::File,
+}
+
+impl Drop for FileLockGuard<'_> {
+    fn drop(&mut self) {
+        let _ = fs2::FileExt::unlock(self.file);
+    }
+}
+
+/// Try to acquire an exclusive advisory lock on `file`, retrying with a
+/// 10 ms backoff until `timeout` expires.  If the timeout is reached the
+/// function returns without holding the lock so the caller can proceed
+/// best-effort.
+fn lock_exclusive_with_timeout(file: &std::fs::File, timeout: Duration) {
+    let start = Instant::now();
+    loop {
+        if fs2::FileExt::try_lock_exclusive(file).unwrap_or(false) {
+            break;
+        }
+        if start.elapsed() >= timeout {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Try to acquire a shared advisory lock on `file`, retrying with a
+/// 10 ms backoff until `timeout` expires.
+fn lock_shared_with_timeout(file: &std::fs::File, timeout: Duration) {
+    let start = Instant::now();
+    loop {
+        if fs2::FileExt::try_lock_shared(file).unwrap_or(false) {
+            break;
+        }
+        if start.elapsed() >= timeout {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
     }
 }
 

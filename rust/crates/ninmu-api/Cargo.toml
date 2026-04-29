@@ -12,6 +12,7 @@ ninmu-runtime = { version = "0.1.0", path = "../ninmu-runtime" }
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
 ninmu-telemetry = { version = "0.1.0", path = "../ninmu-telemetry" }
+fs2 = "0.4"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }
 
 [dev-dependencies]
