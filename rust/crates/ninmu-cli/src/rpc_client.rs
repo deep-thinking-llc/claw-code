@@ -59,7 +59,7 @@ impl ApiClient for RpcApiClient {
                 .messages
                 .into_iter()
                 .map(conversation_message_to_input_message)
-                .collect(),
+                .collect::<Result<Vec<_>, _>>()?,
             system: if request.system_prompt.is_empty() {
                 None
             } else {
@@ -84,7 +84,7 @@ impl ApiClient for RpcApiClient {
 
 fn conversation_message_to_input_message(
     msg: ConversationMessage,
-) -> ninmu_api::InputMessage {
+) -> Result<ninmu_api::InputMessage, RuntimeError> {
     let role = match msg.role {
         MessageRole::System => "system",
         MessageRole::User => "user",
@@ -97,29 +97,30 @@ fn conversation_message_to_input_message(
         .blocks
         .into_iter()
         .map(|b| match b {
-            ContentBlock::Text { text } => ninmu_api::InputContentBlock::Text { text },
-            ContentBlock::ToolUse { id, name, input } => ninmu_api::InputContentBlock::ToolUse {
-                id,
-                name,
-                input: serde_json::from_str(&input).unwrap_or(serde_json::Value::Null),
-            },
+            ContentBlock::Text { text } => Ok(ninmu_api::InputContentBlock::Text { text }),
+            ContentBlock::ToolUse { id, name, input } => {
+                let value = serde_json::from_str(&input).map_err(|e| {
+                    RuntimeError::new(format!("invalid tool input JSON: {e}"))
+                })?;
+                Ok(ninmu_api::InputContentBlock::ToolUse { id, name, input: value })
+            }
             ContentBlock::ToolResult {
                 tool_use_id,
                 output,
                 is_error,
                 ..
-            } => ninmu_api::InputContentBlock::ToolResult {
+            } => Ok(ninmu_api::InputContentBlock::ToolResult {
                 tool_use_id,
                 content: vec![ToolResultContentBlock::Text { text: output }],
                 is_error,
-            },
+            }),
             ContentBlock::Thinking { thinking } => {
-                ninmu_api::InputContentBlock::Thinking { thinking }
+                Ok(ninmu_api::InputContentBlock::Thinking { thinking })
             }
         })
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
 
-    ninmu_api::InputMessage { role, content }
+    Ok(ninmu_api::InputMessage { role, content })
 }
 
 fn response_to_events(response: MessageResponse) -> Vec<AssistantEvent> {

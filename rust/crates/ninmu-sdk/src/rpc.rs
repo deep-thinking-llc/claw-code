@@ -77,7 +77,7 @@ pub fn run_rpc_server() -> Result<(), String> {
 /// When `factory` is provided, `session.create` will build sessions using
 /// real API clients instead of the dummy stub.
 pub fn run_rpc_server_with_factory(
-    factory: Option<Box<dyn Fn() -> BoxedApiClient + Send>>,
+    factory: Option<Box<dyn Fn(&str) -> BoxedApiClient + Send>>,
 ) -> Result<(), String> {
     let stdin = io::stdin();
     let stdout = io::stdout();
@@ -91,14 +91,14 @@ struct RpcServer<R: BufRead, W: Write> {
     writer: W,
     sessions: HashMap<String, ManagedSession>,
     running: bool,
-    client_factory: Option<Box<dyn Fn() -> BoxedApiClient + Send>>,
+    client_factory: Option<Box<dyn Fn(&str) -> BoxedApiClient + Send>>,
 }
 
 impl<R: BufRead, W: Write> RpcServer<R, W> {
     fn new(
         reader: R,
         writer: W,
-        client_factory: Option<Box<dyn Fn() -> BoxedApiClient + Send>>,
+        client_factory: Option<Box<dyn Fn(&str) -> BoxedApiClient + Send>>,
     ) -> Self {
         Self {
             reader,
@@ -191,7 +191,7 @@ impl<R: BufRead, W: Write> RpcServer<R, W> {
             builder = builder.session(session);
         }
         if let Some(ref factory) = self.client_factory {
-            builder = builder.api_client(factory());
+            builder = builder.api_client(factory(model));
         }
         builder.build()
     }
@@ -251,6 +251,10 @@ impl<R: BufRead, W: Write> RpcServer<R, W> {
             })
             .unwrap_or_default();
 
+        // Security: reject absolute paths and directory traversal
+        if path.starts_with('/') || path.starts_with('\\') || path.contains("..") {
+            return Err("invalid path: absolute paths and '..' are not allowed".to_string());
+        }
         let loaded = Session::load_from_path(path)
             .map_err(|e| format!("failed to load session from {path}: {e}"))?;
         let session_id = loaded.session_id.clone();
@@ -698,15 +702,15 @@ mod tests {
 
     #[test]
     fn session_resume_loads_persisted_session() {
-        // Create a temporary session file
-        let temp_dir = std::env::temp_dir();
-        let session_path = temp_dir.join(format!(
-            "rpc-resume-test-{}.jsonl",
+        // Create a temporary session file under the current directory
+        // (relative paths are required by the RPC path validator).
+        let session_path = format!(
+            "./rpc-resume-test-{}.jsonl",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
-        ));
+        );
 
         let mut session = Session::new();
         session.push_user_text("hello from persisted session").unwrap();
@@ -714,7 +718,7 @@ mod tests {
 
         let input = format!(
             "{{\"jsonrpc\":\"2.0\",\"method\":\"session.resume\",\"params\":{{\"path\":\"{}\",\"model\":\"claude-sonnet-4-6\"}},\"id\":1}}\n",
-            session_path.display().to_string().replace('\\', "\\\\")
+            session_path.replace('\\', "\\\\")
         );
         let reader = Cursor::new(input.as_bytes());
         let mut output = Cursor::new(Vec::new());

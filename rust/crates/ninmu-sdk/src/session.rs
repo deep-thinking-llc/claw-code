@@ -234,15 +234,14 @@ impl AgentSession {
         tool_registry: ToolRegistry,
         permission_mode: PermissionMode,
     ) -> Result<(Self, EventBus), String> {
-        AgentSessionBuilder::new()
+        let mut builder = AgentSessionBuilder::new()
             .model(model)
             .tools(tool_registry)
-            .permission_mode(permission_mode)
-            .build()
-            .map(|(mut session, bus)| {
-                session.system_prompt = system_prompt;
-                (session, bus)
-            })
+            .permission_mode(permission_mode);
+        for line in &system_prompt {
+            builder = builder.system_prompt(line.as_str());
+        }
+        builder.build()
     }
 
     /// Get the session ID.
