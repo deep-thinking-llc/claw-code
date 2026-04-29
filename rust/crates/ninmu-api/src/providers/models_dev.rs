@@ -253,11 +253,10 @@ pub fn refresh_models() -> Result<usize, String> {
 /// Returns immediately; the cache is populated when the fetch completes.
 pub fn refresh_models_async() {
     std::thread::spawn(|| {
-        match refresh_models() {
-            Ok(0) => {} // unchanged — no need to log
-            Ok(count) => eprintln!("[ninmu] loaded {count} models from models.dev"),
-            Err(e) => eprintln!("[ninmu] models.dev refresh failed: {e}"),
-        }
+        // Refresh silently — the model selector will pick up new entries
+        // from the disk cache on next open. No stderr output to avoid
+        // interfering with TUI alternate screen.
+        let _ = refresh_models();
     });
 }
 

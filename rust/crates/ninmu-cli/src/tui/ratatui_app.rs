@@ -761,20 +761,50 @@ impl RatatuiApp {
     const PASTE_THRESHOLD: usize = 128;
     const PASTE_PREVIEW_LEN: usize = 30;
     const PASTE_ANIM_DURATION: Duration = Duration::from_millis(1200);
-    const PACMAN_FRAMES: &[char] = &['ᗤ', 'ᐨ', 'ᗧ', 'ᐨ'];
+    const PACMAN_FRAMES: &[char] = &['C', '(', 'C', '('];
 
     fn is_pacman(ch: char) -> bool {
-        Self::PACMAN_FRAMES.contains(&ch)
+        ch == 'C' || ch == '('
     }
 
     fn handle_paste(&mut self, text: &str) {
-        if text.len() <= Self::PASTE_THRESHOLD {
+        // If a paste animation is still running, finish it first.
+        if self.paste_animating {
+            self.paste_animating = false;
+            self.paste_anim_start = None;
+            if let Some(ref summary) = self.paste_summary {
+                self.input_buf = summary.chars().collect();
+                self.cursor = self.input_buf.len();
+                self.refresh_input_cache();
+            }
+        }
+
+        if self.pasted_text.is_some() {
+            // There's already a paste — append new text to it.
+            if let Some(ref mut existing) = self.pasted_text {
+                existing.push_str(text);
+            }
+            // Recalculate summary from combined text.
+            if let Some(ref combined) = self.pasted_text {
+                let words = combined.split_whitespace().count();
+                let lines = combined.lines().count();
+                self.paste_summary = Some(format!("[Pasted {words} words, {lines} lines]"));
+            }
+            // Update display to show the new summary.
+            if let Some(ref summary) = self.paste_summary {
+                self.input_buf = summary.chars().collect();
+                self.cursor = self.input_buf.len();
+                self.refresh_input_cache();
+            }
+        } else if text.len() <= Self::PASTE_THRESHOLD {
+            // Short paste with no existing paste: insert directly.
             for c in text.chars() {
                 self.input_buf.insert(self.cursor, c);
                 self.cursor += 1;
             }
             self.refresh_input_cache();
         } else {
+            // Long paste: start animation.
             let words: usize = text.split_whitespace().count();
             let lines = text.lines().count();
             self.pasted_text = Some(text.to_string());
@@ -1414,7 +1444,7 @@ impl RatatuiApp {
             spans.push(Span::raw("  "));
         }
 
-        spans.push(Span::styled("? help", Style::default().fg(MUTED)));
+        spans.push(Span::styled("/help", Style::default().fg(MUTED)));
 
         let status = Paragraph::new(Line::from(spans)).style(Style::default().bg(SURFACE));
 
@@ -2859,11 +2889,29 @@ mod tests {
         let collapsed = RatatuiApp::collapse_no_auth_providers(entries);
 
         // OpenAI has auth — both models kept.
-        assert_eq!(collapsed.iter().filter(|e| e.provider == ProviderKind::OpenAi).count(), 2);
+        assert_eq!(
+            collapsed
+                .iter()
+                .filter(|e| e.provider == ProviderKind::OpenAi)
+                .count(),
+            2
+        );
         // Anthropic has no auth — only one entry kept.
-        assert_eq!(collapsed.iter().filter(|e| e.provider == ProviderKind::Anthropic).count(), 1);
+        assert_eq!(
+            collapsed
+                .iter()
+                .filter(|e| e.provider == ProviderKind::Anthropic)
+                .count(),
+            1
+        );
         // DeepSeek has no auth — only one entry kept.
-        assert_eq!(collapsed.iter().filter(|e| e.provider == ProviderKind::DeepSeek).count(), 1);
+        assert_eq!(
+            collapsed
+                .iter()
+                .filter(|e| e.provider == ProviderKind::DeepSeek)
+                .count(),
+            1
+        );
         // Total: 2 + 1 + 1 = 4
         assert_eq!(collapsed.len(), 4);
     }
@@ -3451,5 +3499,89 @@ mod tests {
             app.state.is_generating,
             "watchdog should NOT cancel turn while permission prompt is active"
         );
+    }
+
+    #[test]
+    fn second_paste_appends_to_first() {
+        let mut app = RatatuiApp::new("m".into(), "r".into(), None);
+        let first = "a".repeat(200);
+        let second = "b".repeat(200);
+        app.handle_paste(&first);
+        // Finish animation.
+        app.paste_animating = false;
+        if let Some(ref summary) = app.paste_summary {
+            app.input_buf = summary.chars().collect();
+            app.refresh_input_cache();
+        }
+        // Second paste appends to the first.
+        app.handle_paste(&second);
+        let submitted = app.submit_text();
+        assert_eq!(submitted, format!("{first}{second}"));
+        // Summary reflects combined counts.
+        let summary = app.paste_summary.as_ref().unwrap();
+        assert!(summary.contains("words"));
+    }
+
+    #[test]
+    fn second_short_paste_appends_to_existing() {
+        let mut app = RatatuiApp::new("m".into(), "r".into(), None);
+        app.handle_paste(&"a".repeat(200));
+        app.paste_animating = false;
+        if let Some(ref summary) = app.paste_summary {
+            app.input_buf = summary.chars().collect();
+            app.refresh_input_cache();
+        }
+        // Short second paste also appends.
+        app.handle_paste(" more text");
+        assert_eq!(
+            app.submit_text(),
+            format!("{}{}", "a".repeat(200), " more text")
+        );
+    }
+
+    #[test]
+    fn ascii_pacman_renders_in_display() {
+        let mut app = RatatuiApp::new("m".into(), "r".into(), None);
+        app.handle_paste(&"x".repeat(200));
+        assert!(app.paste_animating);
+        let display = app.paste_display_text();
+        assert!(
+            display.contains('C') || display.contains('('),
+            "ASCII pacman char should be visible"
+        );
+    }
+
+    #[test]
+    fn e2e_paste_paste_type_submit() {
+        // Paste long → paste long again → type " done" → submit
+        let mut app = RatatuiApp::new("m".into(), "r".into(), None);
+        let first = "first paste content ";
+        let second = "second paste content";
+        let long_first = format!("{first}{}", "a".repeat(200));
+        let long_second = format!("{second}{}", "b".repeat(200));
+
+        app.handle_paste(&long_first);
+        app.paste_animating = false;
+        if let Some(ref summary) = app.paste_summary {
+            app.input_buf = summary.chars().collect();
+            app.refresh_input_cache();
+        }
+
+        app.handle_paste(&long_second);
+        app.paste_animating = false;
+        if let Some(ref summary) = app.paste_summary {
+            app.input_buf = summary.chars().collect();
+            app.refresh_input_cache();
+        }
+
+        // Type " done".
+        for c in " done".chars() {
+            app.paste_suffix.push(c);
+        }
+
+        let submitted = app.submit_text();
+        assert!(submitted.starts_with(first));
+        assert!(submitted.contains(second));
+        assert!(submitted.ends_with(" done"));
     }
 }
