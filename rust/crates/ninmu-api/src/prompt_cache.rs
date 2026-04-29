@@ -124,9 +124,9 @@ impl PromptCache {
         let paths = PromptCachePaths::for_session(&config.session_id);
         let lock_file = Arc::new(create_lock_file(&paths.lock_file_path));
         lock_shared_with_timeout(&lock_file, Duration::from_secs(5));
-        let _guard = FileLockGuard { file: &lock_file };
         let stats = read_json::<PromptCacheStats>(&paths.stats_path).unwrap_or_default();
         let previous = read_json::<TrackedPromptState>(&paths.session_state_path);
+        let _ = fs2::FileExt::unlock(&*lock_file);
         Self {
             inner: Arc::new(Mutex::new(PromptCacheInner {
                 config,
@@ -155,8 +155,8 @@ impl PromptCache {
         let entry_path = inner.paths.completion_entry_path(&request_hash);
         let ttl = inner.config.completion_ttl;
 
-        lock_exclusive_with_timeout(&self.lock_file, Duration::from_secs(5));
-        let _guard = FileLockGuard { file: &self.lock_file };
+        lock_exclusive_with_timeout(&*self.lock_file, Duration::from_secs(5));
+        let _guard = FileLockGuard { file: &*self.lock_file };
 
         let entry = read_json::<CompletionCacheEntry>(&entry_path);
         let Some(entry) = entry else {
@@ -237,8 +237,8 @@ impl PromptCache {
 
         inner.previous = Some(current);
 
-        lock_exclusive_with_timeout(&self.lock_file, Duration::from_secs(5));
-        let _guard = FileLockGuard { file: &self.lock_file };
+        lock_exclusive_with_timeout(&*self.lock_file, Duration::from_secs(5));
+        let _guard = FileLockGuard { file: &*self.lock_file };
 
         if let Some(response) = response {
             write_completion_entry(&inner.paths, &request_hash, response);
