@@ -8,7 +8,7 @@
 
 ## 1. Motivation
 
-Claw-code aims to serve as an **autonomous AI coding harness** — a system where machines (agents, orchestrators, CI pipelines) drive coding agents without human babysitting. The pi-mono project provides a mature reference implementation of several key primitives:
+Ninmu Code aims to serve as an **autonomous AI coding harness** — a system where machines (agents, orchestrators, CI pipelines) drive coding agents without human babysitting. The pi-mono project provides a mature reference implementation of several key primitives:
 
 - Runtime model configuration (no recompile to add providers)
 - Programmatic SDK for embedding agent capabilities

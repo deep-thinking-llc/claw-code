@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const STARTER_CLAW_JSON: &str = concat!(
+const STARTER_NINMU_JSON: &str = concat!(
     "{\n",
     "  \"permissions\": {\n",
     "    \"defaultMode\": \"dontAsk\"\n",
@@ -168,16 +168,16 @@ struct RepoDetection {
 pub(crate) fn initialize_repo(cwd: &Path) -> Result<InitReport, Box<dyn std::error::Error>> {
     let mut artifacts = Vec::new();
 
-    let claw_dir = cwd.join(".ninmu");
+    let ninmu_dir = cwd.join(".ninmu");
     artifacts.push(InitArtifact {
         name: ".ninmu/",
-        status: ensure_dir(&claw_dir)?,
+        status: ensure_dir(&ninmu_dir)?,
     });
 
-    let claw_json = cwd.join(".ninmu.json");
+    let ninmu_json = cwd.join(".ninmu.json");
     artifacts.push(InitArtifact {
         name: ".ninmu.json",
-        status: write_file_if_missing(&claw_json, STARTER_CLAW_JSON)?,
+        status: write_file_if_missing(&ninmu_json, STARTER_NINMU_JSON)?,
     });
 
     let gitignore = cwd.join(".gitignore");

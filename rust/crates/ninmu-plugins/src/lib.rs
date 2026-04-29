@@ -3527,7 +3527,7 @@ mod tests {
     /// Regression test for ROADMAP #41: verify that `NINMU_CONFIG_HOME` isolation prevents
     /// host `~/.ninmu/plugins/` from bleeding into test runs.
     #[test]
-    fn claw_config_home_isolation_prevents_host_plugin_leakage() {
+    fn ninmu_config_home_isolation_prevents_host_plugin_leakage() {
         let _guard = env_guard();
 
         // Create a temp directory to act as our isolated NINMU_CONFIG_HOME

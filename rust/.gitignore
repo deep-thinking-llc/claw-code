@@ -1,7 +1,7 @@
 target/
 .omx/
-.clawd-agents/
+.nimmud-agents/
 # Ninmu Code local artifacts
-.claw/settings.local.json
-.claw/sessions/
-.clawhip/
+.ninmu/settings.local.json
+.ninmu/sessions/
+.ninmuhip/

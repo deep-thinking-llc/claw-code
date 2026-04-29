@@ -230,7 +230,7 @@ const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         name: "plugin",
         aliases: &["plugins", "marketplace"],
-        summary: "Manage Claw Code plugins",
+        summary: "Manage Ninmu Code plugins",
         argument_hint: Some(
             "[list|install <path>|enable <name>|disable <name>|uninstall <id>|update <id>]",
         ),
@@ -2092,12 +2092,12 @@ pub struct PluginsCommandResult {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum DefinitionSource {
-    ProjectClaw,
+    ProjectNinmu,
     ProjectCodex,
     ProjectClaude,
-    UserClawConfigHome,
+    UserNinmuConfigHome,
     UserCodexHome,
-    UserClaw,
+    UserNinmu,
     UserCodex,
     UserClaude,
 }
@@ -2122,11 +2122,11 @@ impl DefinitionScope {
 impl DefinitionSource {
     fn report_scope(self) -> DefinitionScope {
         match self {
-            Self::ProjectClaw | Self::ProjectCodex | Self::ProjectClaude => {
+            Self::ProjectNinmu | Self::ProjectCodex | Self::ProjectClaude => {
                 DefinitionScope::Project
             }
-            Self::UserClawConfigHome | Self::UserCodexHome => DefinitionScope::UserConfigHome,
-            Self::UserClaw | Self::UserCodex | Self::UserClaude => DefinitionScope::UserHome,
+            Self::UserNinmuConfigHome | Self::UserCodexHome => DefinitionScope::UserConfigHome,
+            Self::UserNinmu | Self::UserCodex | Self::UserClaude => DefinitionScope::UserHome,
         }
     }
 
@@ -2578,7 +2578,7 @@ fn render_mcp_report_for(
                 Err(err) => {
                     let empty = std::collections::BTreeMap::new();
                     Ok(format!(
-                        "Config load error\n  Status           fail\n  Summary          runtime config failed to load; reporting partial MCP view\n  Details          {err}\n  Hint             `claw doctor` classifies config parse errors; fix the listed field and rerun\n\n{}",
+                        "Config load error\n  Status           fail\n  Summary          runtime config failed to load; reporting partial MCP view\n  Details          {err}\n  Hint             `ninmu doctor` classifies config parse errors; fix the listed field and rerun\n\n{}",
                         render_mcp_summary_report(cwd, &empty)
                     ))
                 }
@@ -2605,7 +2605,7 @@ fn render_mcp_report_for(
                     runtime_config.mcp().get(server_name),
                 )),
                 Err(err) => Ok(format!(
-                    "Config load error\n  Status           fail\n  Summary          runtime config failed to load; cannot resolve `{server_name}`\n  Details          {err}\n  Hint             `claw doctor` classifies config parse errors; fix the listed field and rerun"
+                    "Config load error\n  Status           fail\n  Summary          runtime config failed to load; cannot resolve `{server_name}`\n  Details          {err}\n  Hint             `ninmu doctor` classifies config parse errors; fix the listed field and rerun"
                 )),
             }
         }
@@ -2798,7 +2798,7 @@ fn discover_definition_roots(cwd: &Path, leaf: &str) -> Vec<(DefinitionSource, P
     for ancestor in cwd.ancestors() {
         push_unique_root(
             &mut roots,
-            DefinitionSource::ProjectClaw,
+            DefinitionSource::ProjectNinmu,
             ancestor.join(".ninmu").join(leaf),
         );
         push_unique_root(
@@ -2813,11 +2813,11 @@ fn discover_definition_roots(cwd: &Path, leaf: &str) -> Vec<(DefinitionSource, P
         );
     }
 
-    if let Ok(claw_config_home) = env::var("NINMU_CONFIG_HOME") {
+    if let Ok(ninmu_config_home) = env::var("NINMU_CONFIG_HOME") {
         push_unique_root(
             &mut roots,
-            DefinitionSource::UserClawConfigHome,
-            PathBuf::from(claw_config_home).join(leaf),
+            DefinitionSource::UserNinmuConfigHome,
+            PathBuf::from(ninmu_config_home).join(leaf),
         );
     }
 
@@ -2841,7 +2841,7 @@ fn discover_definition_roots(cwd: &Path, leaf: &str) -> Vec<(DefinitionSource, P
         let home = PathBuf::from(home);
         push_unique_root(
             &mut roots,
-            DefinitionSource::UserClaw,
+            DefinitionSource::UserNinmu,
             home.join(".ninmu").join(leaf),
         );
         push_unique_root(
@@ -2866,19 +2866,19 @@ fn discover_skill_roots(cwd: &Path) -> Vec<SkillRoot> {
     for ancestor in cwd.ancestors() {
         push_unique_skill_root(
             &mut roots,
-            DefinitionSource::ProjectClaw,
+            DefinitionSource::ProjectNinmu,
             ancestor.join(".ninmu").join("skills"),
             SkillOrigin::SkillsDir,
         );
         push_unique_skill_root(
             &mut roots,
-            DefinitionSource::ProjectClaw,
+            DefinitionSource::ProjectNinmu,
             ancestor.join(".omc").join("skills"),
             SkillOrigin::SkillsDir,
         );
         push_unique_skill_root(
             &mut roots,
-            DefinitionSource::ProjectClaw,
+            DefinitionSource::ProjectNinmu,
             ancestor.join(".agents").join("skills"),
             SkillOrigin::SkillsDir,
         );
@@ -2896,7 +2896,7 @@ fn discover_skill_roots(cwd: &Path) -> Vec<SkillRoot> {
         );
         push_unique_skill_root(
             &mut roots,
-            DefinitionSource::ProjectClaw,
+            DefinitionSource::ProjectNinmu,
             ancestor.join(".ninmu").join("commands"),
             SkillOrigin::LegacyCommandsDir,
         );
@@ -2914,18 +2914,18 @@ fn discover_skill_roots(cwd: &Path) -> Vec<SkillRoot> {
         );
     }
 
-    if let Ok(claw_config_home) = env::var("NINMU_CONFIG_HOME") {
-        let claw_config_home = PathBuf::from(claw_config_home);
+    if let Ok(ninmu_config_home) = env::var("NINMU_CONFIG_HOME") {
+        let ninmu_config_home = PathBuf::from(ninmu_config_home);
         push_unique_skill_root(
             &mut roots,
-            DefinitionSource::UserClawConfigHome,
-            claw_config_home.join("skills"),
+            DefinitionSource::UserNinmuConfigHome,
+            ninmu_config_home.join("skills"),
             SkillOrigin::SkillsDir,
         );
         push_unique_skill_root(
             &mut roots,
-            DefinitionSource::UserClawConfigHome,
-            claw_config_home.join("commands"),
+            DefinitionSource::UserNinmuConfigHome,
+            ninmu_config_home.join("commands"),
             SkillOrigin::LegacyCommandsDir,
         );
     }
@@ -2950,19 +2950,19 @@ fn discover_skill_roots(cwd: &Path) -> Vec<SkillRoot> {
         let home = PathBuf::from(home);
         push_unique_skill_root(
             &mut roots,
-            DefinitionSource::UserClaw,
+            DefinitionSource::UserNinmu,
             home.join(".ninmu").join("skills"),
             SkillOrigin::SkillsDir,
         );
         push_unique_skill_root(
             &mut roots,
-            DefinitionSource::UserClaw,
+            DefinitionSource::UserNinmu,
             home.join(".omc").join("skills"),
             SkillOrigin::SkillsDir,
         );
         push_unique_skill_root(
             &mut roots,
-            DefinitionSource::UserClaw,
+            DefinitionSource::UserNinmu,
             home.join(".ninmu").join("commands"),
             SkillOrigin::LegacyCommandsDir,
         );
@@ -3075,8 +3075,8 @@ fn install_skill_into(
 }
 
 fn default_skill_install_root() -> std::io::Result<PathBuf> {
-    if let Ok(claw_config_home) = env::var("NINMU_CONFIG_HOME") {
-        return Ok(PathBuf::from(claw_config_home).join("skills"));
+    if let Ok(ninmu_config_home) = env::var("NINMU_CONFIG_HOME") {
+        return Ok(PathBuf::from(ninmu_config_home).join("skills"));
     }
     if let Ok(codex_home) = env::var("CODEX_HOME") {
         return Ok(PathBuf::from(codex_home).join("skills"));
@@ -3777,7 +3777,7 @@ fn render_agents_usage(unexpected: Option<&str>) -> String {
     let mut lines = vec![
         "Agents".to_string(),
         "  Usage            /agents [list|help]".to_string(),
-        "  Direct CLI       claw agents".to_string(),
+        "  Direct CLI       ninmu agents".to_string(),
         "  Sources          .ninmu/agents, ~/.ninmu/agents, $NINMU_CONFIG_HOME/agents".to_string(),
     ];
     if let Some(args) = unexpected {
@@ -3792,7 +3792,7 @@ fn render_agents_usage_json(unexpected: Option<&str>) -> Value {
         "action": "help",
         "usage": {
             "slash_command": "/agents [list|help]",
-            "direct_cli": "claw agents [list|help]",
+            "direct_cli": "ninmu agents [list|help]",
             "sources": [".ninmu/agents", "~/.ninmu/agents", "$NINMU_CONFIG_HOME/agents"],
         },
         "unexpected": unexpected,
@@ -3804,7 +3804,7 @@ fn render_skills_usage(unexpected: Option<&str>) -> String {
         "Skills".to_string(),
         "  Usage            /skills [list|install <path>|help|<skill> [args]]".to_string(),
         "  Alias            /skill".to_string(),
-        "  Direct CLI       claw skills [list|install <path>|help|<skill> [args]]".to_string(),
+        "  Direct CLI       ninmu skills [list|install <path>|help|<skill> [args]]".to_string(),
         "  Invoke           /skills help overview -> $help overview".to_string(),
         "  Install root     $NINMU_CONFIG_HOME/skills or ~/.ninmu/skills".to_string(),
         "  Sources          .ninmu/skills, .omc/skills, .agents/skills, .codex/skills, .claude/skills, ~/.ninmu/skills, ~/.omc/skills, ~/.claude/skills/omc-learned, ~/.codex/skills, ~/.claude/skills, legacy /commands".to_string(),
@@ -3822,7 +3822,7 @@ fn render_skills_usage_json(unexpected: Option<&str>) -> Value {
         "usage": {
             "slash_command": "/skills [list|install <path>|help|<skill> [args]]",
             "aliases": ["/skill"],
-            "direct_cli": "claw skills [list|install <path>|help|<skill> [args]]",
+            "direct_cli": "ninmu skills [list|install <path>|help|<skill> [args]]",
             "invoke": "/skills help overview -> $help overview",
             "install_root": "$NINMU_CONFIG_HOME/skills or ~/.ninmu/skills",
             "sources": [
@@ -3848,7 +3848,7 @@ fn render_mcp_usage(unexpected: Option<&str>) -> String {
     let mut lines = vec![
         "MCP".to_string(),
         "  Usage            /mcp [list|show <server>|help]".to_string(),
-        "  Direct CLI       claw mcp [list|show <server>|help]".to_string(),
+        "  Direct CLI       ninmu mcp [list|show <server>|help]".to_string(),
         "  Sources          .ninmu/settings.json, .ninmu/settings.local.json".to_string(),
     ];
     if let Some(args) = unexpected {
@@ -3863,7 +3863,7 @@ fn render_mcp_usage_json(unexpected: Option<&str>) -> Value {
         "action": "help",
         "usage": {
             "slash_command": "/mcp [list|show <server>|help]",
-            "direct_cli": "claw mcp [list|show <server>|help]",
+            "direct_cli": "ninmu mcp [list|show <server>|help]",
             "sources": [".ninmu/settings.json", ".ninmu/settings.local.json"],
         },
         "unexpected": unexpected,
@@ -3948,14 +3948,14 @@ fn format_mcp_oauth(oauth: Option<&McpOAuthConfig>) -> String {
 
 fn definition_source_id(source: DefinitionSource) -> &'static str {
     match source {
-        DefinitionSource::ProjectClaw
+        DefinitionSource::ProjectNinmu
         | DefinitionSource::ProjectCodex
-        | DefinitionSource::ProjectClaude => "project_claw",
-        DefinitionSource::UserClawConfigHome | DefinitionSource::UserCodexHome => {
-            "user_claw_config_home"
+        | DefinitionSource::ProjectClaude => "project_ninmu",
+        DefinitionSource::UserNinmuConfigHome | DefinitionSource::UserCodexHome => {
+            "user_ninmu_config_home"
         }
-        DefinitionSource::UserClaw | DefinitionSource::UserCodex | DefinitionSource::UserClaude => {
-            "user_claw"
+        DefinitionSource::UserNinmu | DefinitionSource::UserCodex | DefinitionSource::UserClaude => {
+            "user_ninmu"
         }
     }
 }
@@ -4876,7 +4876,7 @@ mod tests {
 
         // then
         assert!(help.contains("/plugin"));
-        assert!(help.contains("Summary          Manage Claw Code plugins"));
+        assert!(help.contains("Summary          Manage Ninmu Code plugins"));
         assert!(help.contains("Aliases          /plugins, /marketplace"));
         assert!(help.contains("Category         Tools"));
     }
@@ -5201,12 +5201,12 @@ mod tests {
         assert_eq!(report["agents"][1]["name"], "verifier");
         assert_eq!(report["agents"][2]["name"], "planner");
         assert_eq!(report["agents"][2]["active"], false);
-        assert_eq!(report["agents"][2]["shadowed_by"]["id"], "project_claw");
+        assert_eq!(report["agents"][2]["shadowed_by"]["id"], "project_ninmu");
 
         let help = handle_agents_slash_command_json(Some("help"), &workspace).expect("agents help");
         assert_eq!(help["kind"], "agents");
         assert_eq!(help["action"], "help");
-        assert_eq!(help["usage"]["direct_cli"], "claw agents [list|help]");
+        assert_eq!(help["usage"]["direct_cli"], "ninmu agents [list|help]");
 
         let unexpected = handle_agents_slash_command_json(Some("show planner"), &workspace)
             .expect("agents usage");
@@ -5320,10 +5320,10 @@ mod tests {
         assert_eq!(report["summary"]["active"], 3);
         assert_eq!(report["summary"]["shadowed"], 1);
         assert_eq!(report["skills"][0]["name"], "plan");
-        assert_eq!(report["skills"][0]["source"]["id"], "project_claw");
+        assert_eq!(report["skills"][0]["source"]["id"], "project_ninmu");
         assert_eq!(report["skills"][1]["name"], "deploy");
         assert_eq!(report["skills"][1]["origin"]["id"], "legacy_commands_dir");
-        assert_eq!(report["skills"][3]["shadowed_by"]["id"], "project_claw");
+        assert_eq!(report["skills"][3]["shadowed_by"]["id"], "project_ninmu");
 
         let help = handle_skills_slash_command_json(Some("help"), &workspace).expect("skills help");
         assert_eq!(help["kind"], "skills");
@@ -5331,7 +5331,7 @@ mod tests {
         assert_eq!(help["usage"]["aliases"][0], "/skill");
         assert_eq!(
             help["usage"]["direct_cli"],
-            "claw skills [list|install <path>|help|<skill> [args]]"
+            "ninmu skills [list|install <path>|help|<skill> [args]]"
         );
 
         let _ = fs::remove_dir_all(workspace);
@@ -5345,7 +5345,7 @@ mod tests {
         let agents_help =
             super::handle_agents_slash_command(Some("help"), &cwd).expect("agents help");
         assert!(agents_help.contains("Usage            /agents [list|help]"));
-        assert!(agents_help.contains("Direct CLI       claw agents"));
+        assert!(agents_help.contains("Direct CLI       ninmu agents"));
         assert!(agents_help.contains(
             "Sources          .ninmu/agents, ~/.ninmu/agents, $NINMU_CONFIG_HOME/agents"
         ));
@@ -5472,7 +5472,7 @@ mod tests {
 
         let help = super::handle_mcp_slash_command(Some("help"), &cwd).expect("mcp help");
         assert!(help.contains("Usage            /mcp [list|show <server>|help]"));
-        assert!(help.contains("Direct CLI       claw mcp [list|show <server>|help]"));
+        assert!(help.contains("Direct CLI       ninmu mcp [list|show <server>|help]"));
 
         let unexpected =
             super::handle_mcp_slash_command(Some("show alpha beta"), &cwd).expect("mcp usage");
@@ -5652,9 +5652,9 @@ mod tests {
 
     #[test]
     fn mcp_degrades_gracefully_on_malformed_mcp_config_144() {
-        // #144: mirror of #143's partial-success contract for `claw mcp`.
+        // #144: mirror of #143's partial-success contract for `ninmu mcp`.
         // Previously `mcp` hard-failed on any config parse error, hiding
-        // well-formed servers and forcing claws to fall back to `doctor`.
+        // well-formed servers and forcing users to fall back to `doctor`.
         // Now `mcp` emits a degraded envelope instead: exit 0, status:
         // "degraded", config_load_error populated, servers[] empty.
         let _guard = env_guard();
