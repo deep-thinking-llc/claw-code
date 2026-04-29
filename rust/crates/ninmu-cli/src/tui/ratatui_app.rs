@@ -2983,12 +2983,12 @@ mod tests {
         app.paste_anim_frame = 0;
         let display = app.paste_display_text();
         assert!(display.starts_with(&"a".repeat(30)), "starts with 30-char preview");
-        assert!(display.contains('ᗤ'), "pacman present");
+        assert!(display.chars().any(RatatuiApp::is_pacman), "pacman present");
 
         // Frame 5: pacman has eaten ~half the excess, summary partially revealed.
         app.paste_anim_frame = 5;
         let display_mid = app.paste_display_text();
-        assert!(display_mid.contains('ᗤ'), "pacman still present");
+        assert!(display_mid.chars().any(RatatuiApp::is_pacman), "pacman still present");
         assert!(display_mid.contains("[Pasted"), "summary beginning to appear");
     }
 
@@ -3183,7 +3183,7 @@ mod tests {
         let display = app.paste_display_text();
         assert_ne!(display, long_paste);
         assert!(
-            display.contains('ᗤ') || display.contains('ᐨ') || display.contains('ᗧ'),
+            display.chars().any(RatatuiApp::is_pacman),
             "pacman should be visible during animation"
         );
 
