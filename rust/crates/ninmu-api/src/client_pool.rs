@@ -23,11 +23,7 @@ pub struct ClientKey {
 
 impl ClientKey {
     #[must_use]
-    pub fn new(
-        provider: ProviderKind,
-        auth_hash: u64,
-        cache_scope_id: impl Into<String>,
-    ) -> Self {
+    pub fn new(provider: ProviderKind, auth_hash: u64, cache_scope_id: impl Into<String>) -> Self {
         Self {
             provider,
             auth_hash,

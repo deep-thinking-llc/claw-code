@@ -487,7 +487,7 @@ impl AnthropicClient {
         let request_url = format!("{}/v1/messages", self.base_url.trim_end_matches('/'));
         let mut request_body = self.request_profile.render_json_body(request)?;
         strip_unsupported_beta_body_fields(&mut request_body);
-        inject_prompt_cache_control_with_options(&mut request_body, self.cache_control_options());
+        inject_prompt_cache_control_with_options(&mut request_body, &self.cache_control_options());
         let request_builder = self.build_request(&request_url).json(&request_body);
         request_builder.send().await.map_err(ApiError::from)
     }
@@ -549,7 +549,7 @@ impl AnthropicClient {
         );
         let mut request_body = self.request_profile.render_json_body(request)?;
         strip_unsupported_beta_body_fields(&mut request_body);
-        inject_prompt_cache_control_with_options(&mut request_body, self.cache_control_options());
+        inject_prompt_cache_control_with_options(&mut request_body, &self.cache_control_options());
         let response = self
             .build_request(&request_url)
             .json(&request_body)
@@ -665,8 +665,9 @@ impl AnthropicClient {
             thinking_mode: None,
         };
 
-        let response = self.send_raw_request(&ping_request).await?;
-        let _ = expect_success(response).await?;
+        if let Ok(response) = self.send_raw_request(&ping_request).await {
+            let _ = expect_success(response).await;
+        }
 
         // Re-check under lock to avoid redundant pings from concurrent requests.
         let mut last = self
@@ -1094,7 +1095,7 @@ fn strip_unsupported_beta_body_fields(body: &mut Value) {
 
 /// Options that control how prompt-cache metadata is injected into the
 /// Anthropic request body.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CacheControlOptions {
     /// When `true`, add `"scope": "global"` to system+tools and
     /// `"scope": "turn"` to messages so that Anthropic can differentiate
@@ -1105,15 +1106,6 @@ pub struct CacheControlOptions {
     pub ttl: Option<String>,
 }
 
-impl Default for CacheControlOptions {
-    fn default() -> Self {
-        Self {
-            enable_scope: false,
-            ttl: None,
-        }
-    }
-}
-
 /// Inject `cache_control: {type: "ephemeral"}` into the request body for
 /// Anthropic prompt caching. This mutates the JSON value in-place.
 ///
@@ -1122,18 +1114,18 @@ impl Default for CacheControlOptions {
 /// - Add `cache_control` to all tool definitions.
 /// - Add `cache_control` to all message content blocks except the last 2 messages.
 pub fn inject_prompt_cache_control(body: &mut Value) {
-    inject_prompt_cache_control_with_options(body, CacheControlOptions::default());
+    inject_prompt_cache_control_with_options(body, &CacheControlOptions::default());
 }
 
 /// Same as [`inject_prompt_cache_control`], but with fine-grained control over
 /// cache scope and TTL.
-pub fn inject_prompt_cache_control_with_options(body: &mut Value, options: CacheControlOptions) {
+pub fn inject_prompt_cache_control_with_options(body: &mut Value, options: &CacheControlOptions) {
     let Some(object) = body.as_object_mut() else {
         return;
     };
 
-    let global_cc = make_cache_control_value(&options, true);
-    let turn_cc = make_cache_control_value(&options, false);
+    let global_cc = make_cache_control_value(options, true);
+    let turn_cc = make_cache_control_value(options, false);
 
     // 1. System prompt: convert string to array of blocks with cache_control.
     if let Some(system) = object.get_mut("system") {

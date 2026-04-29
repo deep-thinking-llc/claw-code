@@ -625,7 +625,7 @@ pub fn model_token_limit(model: &str) -> Option<ModelTokenLimit> {
         }),
         // xAI Grok-4 models
         // Source: https://docs.x.ai/developers/models
-        "grok-4" => Some(ModelTokenLimit {
+        "grok-4" | "mistral-large-latest" | "mistral-medium-latest" => Some(ModelTokenLimit {
             max_output_tokens: 8_192,
             context_window_tokens: 128_000,
         }),
@@ -647,10 +647,6 @@ pub fn model_token_limit(model: &str) -> Option<ModelTokenLimit> {
         }),
         // Mistral models
         // Source: https://docs.mistral.ai/getting-started/models/models_overview/
-        "mistral-large-latest" | "mistral-medium-latest" => Some(ModelTokenLimit {
-            max_output_tokens: 8_192,
-            context_window_tokens: 128_000,
-        }),
         "mistral-small-latest" => Some(ModelTokenLimit {
             max_output_tokens: 4_096,
             context_window_tokens: 32_000,

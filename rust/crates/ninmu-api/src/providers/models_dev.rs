@@ -119,9 +119,7 @@ fn config_home_dir() -> PathBuf {
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
         .unwrap_or_else(|| {
-            let home = std::env::var("HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from("."));
+            let home = std::env::var("HOME").map_or_else(|_| PathBuf::from("."), PathBuf::from);
             home.join(".ninmu")
         })
 }
@@ -204,10 +202,15 @@ pub fn refresh_models() -> Result<usize, String> {
             return Err(format!("HTTP {}", response.status()));
         }
 
-        response.bytes().await.map(|b| b.to_vec()).map_err(|e| format!("read body: {e}"))
+        response
+            .bytes()
+            .await
+            .map(|b| b.to_vec())
+            .map_err(|e| format!("read body: {e}"))
     })?;
 
-    let raw_str = String::from_utf8(raw_bytes).map_err(|_| "non-UTF-8 response from models.dev".to_string())?;
+    let raw_str = String::from_utf8(raw_bytes)
+        .map_err(|_| "non-UTF-8 response from models.dev".to_string())?;
 
     // --- Content-diff against disk cache ---
     let path = disk_cache_path();
@@ -262,9 +265,7 @@ pub fn refresh_models_async() {
 // Conversion
 // ---------------------------------------------------------------------------
 
-fn convert_models_dev_to_entries(
-    providers: &ModelsDevResponse,
-) -> Vec<ModelEntry> {
+fn convert_models_dev_to_entries(providers: &ModelsDevResponse) -> Vec<ModelEntry> {
     let mut entries = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
@@ -449,8 +450,10 @@ mod tests {
         // payload (mocked via the file system). The function will fetch from
         // the real network, so we can't easily mock this — but we can verify
         // the comparison logic works by testing the string comparison.
-        let a = r#"{"openai":{"id":"openai","name":"OpenAI","env":["OPENAI_API_KEY"],"models":{}}}"#;
-        let b = r#"{"openai":{"id":"openai","name":"OpenAI","env":["OPENAI_API_KEY"],"models":{}}}"#;
+        let a =
+            r#"{"openai":{"id":"openai","name":"OpenAI","env":["OPENAI_API_KEY"],"models":{}}}"#;
+        let b =
+            r#"{"openai":{"id":"openai","name":"OpenAI","env":["OPENAI_API_KEY"],"models":{}}}"#;
         assert_eq!(a, b);
         let c = r#"{"openai":{"id":"openai","name":"OpenAI","env":["OPENAI_API_KEY"],"models":{"gpt-4o":{"name":"GPT-4o"}}}}"#;
         assert_ne!(a, c);

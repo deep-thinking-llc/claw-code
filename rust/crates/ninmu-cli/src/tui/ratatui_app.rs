@@ -11,7 +11,9 @@
 use std::io;
 use std::time::{Duration, Instant};
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind, KeyModifiers,
+};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -61,6 +63,7 @@ const SPINNER: &[&str] = &[
 const TOOL_SPINNER: &[&str] = &["|", "/", "-", "\\"];
 
 /// All the state needed to render one frame of the TUI.
+#[allow(clippy::struct_excessive_bools)]
 pub struct RatatuiApp {
     scrollback: Scrollback,
     input_buf: Vec<char>,
@@ -117,6 +120,16 @@ pub struct RatatuiApp {
     model_selector: Option<ModelSelector>,
     /// Selected model callback — set by the TUI to communicate model changes.
     selected_model: Option<String>,
+    /// Original pasted text (for long pastes collapsed to a summary).
+    pasted_text: Option<String>,
+    /// Whether a paste animation is currently running.
+    paste_animating: bool,
+    /// Current frame index of the paste animation.
+    paste_anim_frame: usize,
+    /// When the paste animation started.
+    paste_anim_start: Option<Instant>,
+    /// Summary string shown after paste animation completes.
+    paste_summary: Option<String>,
 }
 
 /// A permission prompt waiting for the user to respond in the TUI.
@@ -178,6 +191,11 @@ impl RatatuiApp {
             last_event_received: None,
             model_selector: None,
             selected_model: None,
+            pasted_text: None,
+            paste_animating: false,
+            paste_anim_frame: 0,
+            paste_anim_start: None,
+            paste_summary: None,
         };
         app.cached_header = Self::build_header_line(
             &app.model,
@@ -246,6 +264,7 @@ impl RatatuiApp {
         execute!(
             stdout,
             EnterAlternateScreen,
+            EnableBracketedPaste,
             terminal::Clear(terminal::ClearType::All)
         )?;
         let backend = CrosstermBackend::new(stdout);
@@ -258,7 +277,11 @@ impl RatatuiApp {
         }));
 
         disable_raw_mode()?;
-        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+        execute!(
+            terminal.backend_mut(),
+            DisableBracketedPaste,
+            LeaveAlternateScreen
+        )?;
         terminal.show_cursor()?;
 
         match result {
@@ -463,9 +486,19 @@ impl RatatuiApp {
                                 self.refresh_input_cache();
                             }
                             KeyCode::Enter if !self.input_buf.is_empty() => {
-                                let input: String = self.input_buf.drain(..).collect();
-                                self.cursor = 0;
-                                self.refresh_input_cache();
+                                let input = if self.pasted_text.is_some() {
+                                    let text = self.submit_text();
+                                    self.input_buf.clear();
+                                    self.cursor = 0;
+                                    self.clear_paste_state();
+                                    self.refresh_input_cache();
+                                    text
+                                } else {
+                                    let text: String = self.input_buf.drain(..).collect();
+                                    self.cursor = 0;
+                                    self.refresh_input_cache();
+                                    text
+                                };
                                 // Save to history, deduplicate consecutive.
                                 if self.input_history.last().is_none_or(|last| last != &input) {
                                     self.input_history.push(input.clone());
@@ -478,7 +511,14 @@ impl RatatuiApp {
                                 if trimmed == "/model" {
                                     self.open_model_selector();
                                 } else {
-                                    self.scrollback.push(format!("  \u{25B8} {input}"));
+                                    let scrollback_display =
+                                        if let Some(ref summary) = self.paste_summary {
+                                            summary.clone()
+                                        } else {
+                                            input.clone()
+                                        };
+                                    self.scrollback
+                                        .push(format!("  \u{25B8} {scrollback_display}"));
                                     match start_turn(&input) {
                                         Ok(handle) => {
                                             self.state.is_generating = true;
@@ -499,14 +539,26 @@ impl RatatuiApp {
                                 if key.modifiers.is_empty()
                                     || key.modifiers == KeyModifiers::SHIFT =>
                             {
+                                if self.paste_summary.is_some() {
+                                    self.clear_paste_state();
+                                    self.input_buf.clear();
+                                    self.cursor = 0;
+                                }
                                 self.input_buf.insert(self.cursor, c);
                                 self.cursor += 1;
                                 self.refresh_input_cache();
                             }
                             KeyCode::Backspace if self.cursor > 0 => {
-                                self.cursor -= 1;
-                                self.input_buf.remove(self.cursor);
-                                self.refresh_input_cache();
+                                if self.paste_summary.is_some() {
+                                    self.clear_paste_state();
+                                    self.input_buf.clear();
+                                    self.cursor = 0;
+                                    self.refresh_input_cache();
+                                } else {
+                                    self.cursor -= 1;
+                                    self.input_buf.remove(self.cursor);
+                                    self.refresh_input_cache();
+                                }
                             }
                             KeyCode::Delete if self.cursor < self.input_buf.len() => {
                                 self.input_buf.remove(self.cursor);
@@ -574,6 +626,8 @@ impl RatatuiApp {
                         self.dirty = true;
                         self.refresh_status_cache();
                     }
+                } else if let Event::Paste(text) = event {
+                    self.handle_paste(&text);
                 } else if matches!(event, Event::Resize(_, _)) {
                     self.dirty = true;
                 }
@@ -605,7 +659,7 @@ impl RatatuiApp {
                     // worker thread in 3 minutes, the turn is likely stuck
                     // (dead SSE connection, blocked tool, etc.). Force-cancel
                     // and unlock the input so the user can continue.
-                    const STALL_WATCHDOG: Duration = Duration::from_secs(180);
+                    const STALL_WATCHDOG: Duration = Duration::from_mins(3);
                     if last.elapsed() > STALL_WATCHDOG {
                         turn_handle.take();
                         self.state.is_generating = false;
@@ -630,6 +684,21 @@ impl RatatuiApp {
                 if self.spinner_frame.is_multiple_of(4) {
                     self.show_cursor_blink = !self.show_cursor_blink;
                 }
+                // Advance paste animation
+                if self.paste_animating {
+                    self.paste_anim_frame = self.paste_anim_frame.wrapping_add(1);
+                    if let Some(start) = self.paste_anim_start {
+                        if start.elapsed() >= Duration::from_millis(600) {
+                            self.paste_animating = false;
+                            self.paste_anim_start = None;
+                            if let Some(ref summary) = self.paste_summary {
+                                self.input_buf = summary.chars().collect();
+                                self.cursor = self.input_buf.len();
+                                self.refresh_input_cache();
+                            }
+                        }
+                    }
+                }
                 self.dirty = true;
             }
         }
@@ -645,6 +714,67 @@ impl RatatuiApp {
             .turn_start
             .map(|t| format!("{}s", t.elapsed().as_secs()))
             .unwrap_or_default();
+    }
+
+    const PASTE_THRESHOLD: usize = 128;
+    const PASTE_ANIM_CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789{}[]()<>=-+*&^%$#@!~";
+
+    fn handle_paste(&mut self, text: &str) {
+        if text.len() <= Self::PASTE_THRESHOLD {
+            for c in text.chars() {
+                self.input_buf.insert(self.cursor, c);
+                self.cursor += 1;
+            }
+            self.refresh_input_cache();
+        } else {
+            let words: usize = text.split_whitespace().count();
+            let lines = text.lines().count();
+            self.pasted_text = Some(text.to_string());
+            self.paste_summary = Some(format!("[Pasted {words} words, {lines} lines]"));
+            self.paste_animating = true;
+            self.paste_anim_frame = 0;
+            self.paste_anim_start = Some(Instant::now());
+            let preview: String = text.chars().take(Self::PASTE_THRESHOLD).collect();
+            self.input_buf = preview.chars().collect();
+            self.cursor = self.input_buf.len();
+            self.refresh_input_cache();
+        }
+        self.dirty = true;
+    }
+
+    fn paste_display_text(&self) -> String {
+        if self.paste_animating {
+            let base: String = self.input_buf.iter().collect();
+            let mut chars: Vec<char> = base.chars().collect();
+            let frame = self.paste_anim_frame;
+            for (i, ch) in chars.iter_mut().enumerate() {
+                if i.wrapping_add(frame).is_multiple_of(3) {
+                    let idx = (i.wrapping_mul(7).wrapping_add(frame))
+                        % Self::PASTE_ANIM_CHARS.len();
+                    *ch = Self::PASTE_ANIM_CHARS[idx] as char;
+                }
+            }
+            chars.into_iter().collect()
+        } else if self.paste_summary.is_some() {
+            self.paste_summary.clone().unwrap_or_default()
+        } else {
+            self.cached_input.clone()
+        }
+    }
+
+    fn submit_text(&self) -> String {
+        if let Some(ref pasted) = self.pasted_text {
+            return pasted.clone();
+        }
+        self.cached_input.clone()
+    }
+
+    fn clear_paste_state(&mut self) {
+        self.pasted_text = None;
+        self.paste_summary = None;
+        self.paste_animating = false;
+        self.paste_anim_start = None;
+        self.paste_anim_frame = 0;
     }
 
     fn process_event(&mut self, ev: TuiEvent) {
@@ -1094,15 +1224,31 @@ impl RatatuiApp {
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
+        let display_text = self.paste_display_text();
+        let text_style = if self.paste_animating {
+            let brightness = if self.paste_anim_frame.is_multiple_of(2) {
+                Color::Rgb(80, 255, 80)
+            } else {
+                Color::Rgb(40, 200, 40)
+            };
+            Style::default()
+                .fg(brightness)
+                .add_modifier(Modifier::BOLD)
+        } else if self.paste_summary.is_some() {
+            Style::default().fg(TEXT_SEC)
+        } else {
+            Style::default().fg(TEXT)
+        };
+
         let spans = vec![
             Span::styled("> ", Style::default().fg(ACCENT)),
-            Span::styled(self.cached_input.clone(), Style::default().fg(TEXT)),
+            Span::styled(display_text, text_style),
         ];
 
         let paragraph = Paragraph::new(Line::from(spans));
         frame.render_widget(paragraph, inner);
 
-        if !self.state.is_generating {
+        if !self.state.is_generating && !self.paste_animating {
             let cursor_x = inner.x + 2 + u16::try_from(self.cursor).unwrap_or(u16::MAX);
             let cursor_y = inner.y;
             frame.set_cursor_position((cursor_x, cursor_y));
@@ -1363,7 +1509,7 @@ impl RatatuiApp {
                     Style::default().fg(Color::Rgb(255, 200, 170)).bg(ACCENT)
                 }
             } else {
-                Style::default().fg(if no_auth { MUTED } else { MUTED })
+                Style::default().fg(MUTED)
             };
 
             let label = if entry.alias == entry.canonical {
@@ -2555,7 +2701,7 @@ mod tests {
     #[test]
     fn watchdog_detects_stalled_turn() {
         let app = RatatuiApp::new("m".into(), "r".into(), None);
-        const STALL_WATCHDOG: Duration = Duration::from_secs(180);
+        const STALL_WATCHDOG: Duration = Duration::from_mins(3);
         // Simulate a last event received 181 seconds ago.
         let last = Instant::now() - Duration::from_secs(181);
         assert!(
@@ -2567,7 +2713,7 @@ mod tests {
     #[test]
     fn watchdog_does_not_trigger_on_active_turn() {
         let app = RatatuiApp::new("m".into(), "r".into(), None);
-        const STALL_WATCHDOG: Duration = Duration::from_secs(180);
+        const STALL_WATCHDOG: Duration = Duration::from_mins(3);
         // Simulate a last event received just now.
         let last = Instant::now();
         assert!(
@@ -2588,7 +2734,7 @@ mod tests {
         app.turn_start = Some(Instant::now() - Duration::from_secs(200));
 
         // Simulate what the watchdog does.
-        const STALL_WATCHDOG: Duration = Duration::from_secs(180);
+        const STALL_WATCHDOG: Duration = Duration::from_mins(3);
         if let Some(last) = app.last_event_received {
             if last.elapsed() > STALL_WATCHDOG {
                 app.state.is_generating = false;
