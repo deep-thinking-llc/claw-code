@@ -440,8 +440,20 @@ mod tests {
 
     #[test]
     fn disk_cache_path_uses_ninmu_dir() {
+        // Guard against parallel tests that mutate NINMU_CONFIG_HOME.
+        let original = std::env::var("NINMU_CONFIG_HOME").ok();
+        std::env::remove_var("NINMU_CONFIG_HOME");
         let path = disk_cache_path();
-        assert!(path.ends_with(".ninmu/models.dev.cache"));
+        // Restore original value.
+        match original {
+            Some(val) => std::env::set_var("NINMU_CONFIG_HOME", val),
+            None => std::env::remove_var("NINMU_CONFIG_HOME"),
+        }
+        assert!(
+            path.ends_with(".ninmu/models.dev.cache"),
+            "expected path to end with .ninmu/models.dev.cache, got: {}",
+            path.display()
+        );
     }
 
     #[test]

@@ -693,7 +693,7 @@ impl RatatuiApp {
                 if self.paste_animating {
                     self.paste_anim_frame = self.paste_anim_frame.wrapping_add(1);
                     if let Some(start) = self.paste_anim_start {
-                        if start.elapsed() >= Duration::from_millis(600) {
+                        if start.elapsed() >= Self::PASTE_ANIM_DURATION {
                             self.paste_animating = false;
                             self.paste_anim_start = None;
                             if let Some(ref summary) = self.paste_summary {
@@ -722,8 +722,9 @@ impl RatatuiApp {
     }
 
     const PASTE_THRESHOLD: usize = 128;
-    const PASTE_ANIM_CHARS: &[u8] =
-        b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789{}[]()<>=-+*&^%$#@!~";
+    const PASTE_PREVIEW_LEN: usize = 30;
+    const PASTE_ANIM_DURATION: Duration = Duration::from_millis(1200);
+    const PACMAN_FRAMES: &[char] = &['ᗤ', 'ᐨ', 'ᗧ', 'ᐨ'];
 
     fn handle_paste(&mut self, text: &str) {
         if text.len() <= Self::PASTE_THRESHOLD {
@@ -740,7 +741,7 @@ impl RatatuiApp {
             self.paste_animating = true;
             self.paste_anim_frame = 0;
             self.paste_anim_start = Some(Instant::now());
-            let preview: String = text.chars().take(Self::PASTE_THRESHOLD).collect();
+            let preview: String = text.chars().take(Self::PASTE_PREVIEW_LEN).collect();
             self.input_buf = preview.chars().collect();
             self.cursor = self.input_buf.len();
             self.refresh_input_cache();
@@ -750,17 +751,43 @@ impl RatatuiApp {
 
     fn paste_display_text(&self) -> String {
         if self.paste_animating {
-            let base: String = self.input_buf.iter().collect();
-            let mut chars: Vec<char> = base.chars().collect();
-            let frame = self.paste_anim_frame;
-            for (i, ch) in chars.iter_mut().enumerate() {
-                if i.wrapping_add(frame).is_multiple_of(3) {
-                    let idx =
-                        (i.wrapping_mul(7).wrapping_add(frame)) % Self::PASTE_ANIM_CHARS.len();
-                    *ch = Self::PASTE_ANIM_CHARS[idx] as char;
+            let preview: String = self.input_buf.iter().collect();
+            // Total chars beyond the preview that the pacman needs to eat.
+            let total_eaten_target = if let Some(ref pasted) = self.pasted_text {
+                pasted.len().saturating_sub(Self::PASTE_PREVIEW_LEN)
+            } else {
+                0
+            };
+            let tick_rate = Duration::from_millis(120);
+            let elapsed_ticks = self.paste_anim_frame;
+            let max_ticks =
+                (Self::PASTE_ANIM_DURATION.as_millis() / tick_rate.as_millis()).max(1) as usize;
+            let eaten = if max_ticks > 0 && total_eaten_target > 0 {
+                (total_eaten_target * elapsed_ticks / max_ticks).min(total_eaten_target)
+            } else {
+                total_eaten_target
+            };
+            let remaining = total_eaten_target.saturating_sub(eaten);
+            let pacman = Self::PACMAN_FRAMES[elapsed_ticks % Self::PACMAN_FRAMES.len()];
+
+            // Build: first_30 + [remaining chars not yet eaten] + pacman + summary_so_far
+            let mut result = String::new();
+            result.push_str(&preview);
+            if remaining > 0 {
+                // Show chars from original text that haven't been eaten yet.
+                if let Some(ref pasted) = self.pasted_text {
+                    let start = Self::PASTE_PREVIEW_LEN + eaten;
+                    let chunk: String = pasted.chars().skip(start).take(remaining).collect();
+                    result.push_str(&chunk);
                 }
             }
-            chars.into_iter().collect()
+            result.push(pacman);
+            // Reveal summary progressively as chars are eaten.
+            if let Some(ref summary) = self.paste_summary {
+                let reveal = eaten.min(summary.len());
+                result.push_str(&summary.chars().take(reveal).collect::<String>());
+            }
+            result
         } else if let Some(ref summary) = self.paste_summary {
             if self.paste_suffix.is_empty() {
                 summary.clone()
@@ -1267,16 +1294,16 @@ impl RatatuiApp {
         let display_text = self.paste_display_text();
         let display_len = display_text.len();
         let spans = if self.paste_animating {
-            let brightness = if self.paste_anim_frame.is_multiple_of(2) {
-                Color::Rgb(80, 255, 80)
+            let orange = if self.paste_anim_frame.is_multiple_of(2) {
+                Color::Rgb(255, 160, 40)
             } else {
-                Color::Rgb(40, 200, 40)
+                Color::Rgb(255, 120, 20)
             };
             vec![
                 Span::styled("> ", Style::default().fg(ACCENT)),
                 Span::styled(
                     &display_text,
-                    Style::default().fg(brightness).add_modifier(Modifier::BOLD),
+                    Style::default().fg(orange).add_modifier(Modifier::BOLD),
                 ),
             ]
         } else if let Some(ref summary) = self.paste_summary {
@@ -2942,16 +2969,36 @@ mod tests {
     }
 
     #[test]
-    fn paste_animation_generates_scrambled_text() {
+    fn paste_animation_shows_pacman_and_preview() {
         let mut app = RatatuiApp::new("m".into(), "r".into(), None);
         let text = "a".repeat(200);
         app.handle_paste(&text);
-        app.paste_animating = true;
-        app.paste_anim_frame = 1;
+        assert!(app.paste_animating);
+
+        // Frame 0: preview (first 30 chars) + remaining 170 chars + pacman.
+        app.paste_anim_frame = 0;
         let display = app.paste_display_text();
-        let preview: String = text.chars().take(128).collect();
-        assert_ne!(display, preview);
-        assert_eq!(display.len(), preview.len());
+        assert!(display.starts_with(&"a".repeat(30)), "starts with 30-char preview");
+        assert!(display.contains('ᗤ'), "pacman present");
+
+        // Frame 5: pacman has eaten ~half the excess, summary partially revealed.
+        app.paste_anim_frame = 5;
+        let display_mid = app.paste_display_text();
+        assert!(display_mid.contains('ᗤ'), "pacman still present");
+        assert!(display_mid.contains("[Pasted"), "summary beginning to appear");
+    }
+
+    #[test]
+    fn paste_animation_reveals_summary_as_pacman_eats() {
+        let mut app = RatatuiApp::new("m".into(), "r".into(), None);
+        let text = "x".repeat(200);
+        app.handle_paste(&text);
+
+        // Near end of animation — most of summary visible.
+        app.paste_anim_frame = 8;
+        let display = app.paste_display_text();
+        assert!(display.contains("[Pasted"));
+        assert!(display.contains("words"));
     }
 
     #[test]
@@ -3131,9 +3178,12 @@ mod tests {
         app.paste_anim_frame = 5;
         let display = app.paste_display_text();
         assert_ne!(display, long_paste);
-        assert_eq!(display.len(), 128);
+        eprintln!("DEBUG display: {:?}", display);
+        eprintln!("DEBUG pasted_text len: {:?}", app.pasted_text.as_ref().map(|s| s.len()));
+        eprintln!("DEBUG animating: {}", app.paste_animating);
+        assert!(display.contains('ᗤ'), "pacman should be visible during animation");
 
-        // Step 3: Animation completes (600ms passed).
+        // Step 3: Animation completes (1200ms passed).
         app.paste_animating = false;
         app.paste_anim_start = None;
         if let Some(ref summary) = app.paste_summary {
@@ -3243,13 +3293,12 @@ mod tests {
         let raw = format!("secret{}\nmore secret stuff", "x".repeat(500));
         app.handle_paste(&raw);
 
-        // During animation.
+        // During animation — shows preview (first 30 chars) + pacman.
         app.paste_anim_frame = 3;
         let display = app.paste_display_text();
-        assert!(!display.contains("secret"));
-        assert_eq!(display.len(), 128);
+        assert!(display.contains('ᗤ'), "pacman visible during animation");
 
-        // After animation.
+        // After animation — shows summary only, never raw text.
         app.paste_animating = false;
         let display = app.paste_display_text();
         assert!(display.starts_with("[Pasted "));

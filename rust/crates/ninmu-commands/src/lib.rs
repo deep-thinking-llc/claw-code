@@ -3954,9 +3954,9 @@ fn definition_source_id(source: DefinitionSource) -> &'static str {
         DefinitionSource::UserNinmuConfigHome | DefinitionSource::UserCodexHome => {
             "user_ninmu_config_home"
         }
-        DefinitionSource::UserNinmu | DefinitionSource::UserCodex | DefinitionSource::UserClaude => {
-            "user_ninmu"
-        }
+        DefinitionSource::UserNinmu
+        | DefinitionSource::UserCodex
+        | DefinitionSource::UserClaude => "user_ninmu",
     }
 }
 
