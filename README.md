@@ -9,6 +9,8 @@
   ·
   <a href="./docs/HUMAN-DX.md">Human Experience</a>
   ·
+  <a href="./docs/TUI-USER-GUIDE.md">TUI Guide</a>
+  ·
   <a href="./docs/PI-MONO-PARITY-DESIGN.md">Architecture</a>
 </p>
 
@@ -92,6 +94,9 @@ export OPENAI_API_KEY="sk-..."
 
 # Interactive REPL
 ./target/debug/ninmu
+
+# Full-screen terminal UI
+./target/debug/ninmu --tui
 
 # Health check
 ./target/debug/ninmu doctor
