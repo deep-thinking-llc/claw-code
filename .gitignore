@@ -32,10 +32,11 @@ docs/implementation_pass.md
 /docs/AGENT-INTEGRATION.md
 /docs/HARNESS-CONTRACT.md
 /docs/HUMAN-DX.md
-/rust/TUI-ENHANCEMENT-PLAN.md
-/rust/MOCK_PARITY_HARNESS.md
-/rust/PARITY.md
-/rust/.omc/plans/
+/src/TUI-ENHANCEMENT-PLAN.md
+/src/MOCK_PARITY_HARNESS.md
+/src/PARITY.md
+/src/.omc/plans/
+.worktrees/
 
 # macOS
 .DS_Store

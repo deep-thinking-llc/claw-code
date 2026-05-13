@@ -57,7 +57,7 @@ Ninmu Code is an **autonomous coding harness** — a system where AI agents exec
 
 ```bash
 git clone https://github.com/deep-thinking-llc/ninmu-code
-cd ninmu-code/rust
+cd ninmu-code/src
 cargo build --workspace
 ```
 
@@ -111,8 +111,8 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ninmu-sdk = { path = "../rust/crates/ninmu-sdk" }
-ninmu-runtime = { path = "../rust/crates/ninmu-runtime" }
+ninmu-sdk = { path = "../src/crates/ninmu-sdk" }
+ninmu-runtime = { path = "../src/crates/ninmu-runtime" }
 ```
 
 ```rust
@@ -236,21 +236,21 @@ Add any OpenAI-compatible or Anthropic-compatible provider via `models.json` —
 
 ```
 ninmu-code/
-├── rust/                        # Rust workspace
+├── src/                         # Rust workspace
 │   ├── Cargo.toml               # Workspace root
 │   └── crates/
-│       ├── api/                 # Provider clients (Anthropic, OpenAI, custom)
-│       ├── commands/            # Shared slash-command registry + help
-│       ├── compat-harness/      # TS manifest extraction harness
-│       ├── mock-anthropic-service/ # Deterministic mock for CLI tests
-│       ├── plugins/             # Plugin system
-│       ├── runtime/             # Session engine, permissions, MCP, auth
-│       ├── sdk/                 # Agent SDK (AgentSession, Orchestrator,
+│       ├── ninmu-api/           # Provider clients (Anthropic, OpenAI, custom)
+│       ├── ninmu-commands/      # Shared slash-command registry + help
+│       ├── ninmu-compat-harness/ # TS manifest extraction harness
+│       ├── ninmu-mock-anthropic-service/ # Deterministic mock for CLI tests
+│       ├── ninmu-plugins/       # Plugin system
+│       ├── ninmu-runtime/       # Session engine, permissions, MCP, auth
+│       ├── ninmu-sdk/           # Agent SDK (AgentSession, Orchestrator,
 │       │                       #   ReviewManager, NotificationDispatcher,
 │       │                       #   SecretScrubber, AuditLog, SetupReport)
 │       ├── ninmu-cli/           # CLI binary (`ninmu`)
-│       ├── telemetry/           # Session tracing + usage telemetry
-│       └── tools/               # Built-in tool implementations
+│       ├── ninmu-telemetry/     # Session tracing + usage telemetry
+│       └── ninmu-tools/         # Built-in tool implementations
 ├── docs/                        # Documentation
 │   ├── private/                 # Private docs submodule
 │   └── TUI-USER-GUIDE.md        # TUI guide
@@ -269,7 +269,7 @@ ninmu-code/
 ## Development
 
 ```bash
-cd rust
+cd src
 
 # Build
 cargo build --workspace

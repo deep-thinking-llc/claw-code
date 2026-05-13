@@ -11,13 +11,9 @@ on:
       - .github/scripts/check_doc_source_of_truth.py
       - .github/FUNDING.yml
       - README.md
-      - USAGE.md
-      - PARITY.md
-      - PHILOSOPHY.md
-      - ROADMAP.md
       - deploy/**
       - docs/**
-      - rust/**
+      - src/**
   pull_request:
     branches:
       - main
@@ -26,13 +22,9 @@ on:
       - .github/scripts/check_doc_source_of_truth.py
       - .github/FUNDING.yml
       - README.md
-      - USAGE.md
-      - PARITY.md
-      - PHILOSOPHY.md
-      - ROADMAP.md
       - deploy/**
       - docs/**
-      - rust/**
+      - src/**
   workflow_dispatch:
 
 concurrency:
@@ -41,7 +33,7 @@ concurrency:
 
 defaults:
   run:
-    working-directory: rust
+    working-directory: src
 
 env:
   CARGO_TERM_COLOR: always
@@ -71,7 +63,7 @@ jobs:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust -> target
+          workspaces: src -> target
       - name: Check formatting
         run: cargo fmt --all --check
 
@@ -83,7 +75,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust -> target
+          workspaces: src -> target
       - name: Run workspace tests
         run: cargo test --workspace
 
@@ -97,6 +89,6 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust -> target
+          workspaces: src -> target
       - name: Run workspace clippy
         run: cargo clippy --workspace
