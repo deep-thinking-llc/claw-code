@@ -851,12 +851,15 @@ impl RatatuiApp {
                                 if key.modifiers.is_empty()
                                     || key.modifiers == KeyModifiers::SHIFT =>
                             {
+                                self.reveal_paste_span_interior(self.cursor);
                                 self.input_buf.insert(self.cursor, c);
                                 self.cursor += 1;
                                 self.shift_paste_spans(self.cursor - 1, 1);
                                 self.refresh_input_cache();
                             }
                             KeyCode::Backspace if self.cursor > 0 => {
+                                let delete_pos = self.cursor - 1;
+                                self.reveal_paste_span_containing(delete_pos);
                                 self.cursor -= 1;
                                 let removed = self.input_buf.remove(self.cursor);
                                 self.shift_paste_spans(self.cursor, -1);
@@ -866,12 +869,21 @@ impl RatatuiApp {
                                 self.refresh_input_cache();
                             }
                             KeyCode::Delete if self.cursor < self.input_buf.len() => {
-                                self.input_buf.remove(self.cursor);
+                                self.reveal_paste_span_containing(self.cursor);
+                                let removed = self.input_buf.remove(self.cursor);
+                                self.shift_paste_spans(self.cursor, -1);
+                                if removed == '\n' || !removed.is_whitespace() {
+                                    self.trim_trailing_paste_span();
+                                }
                                 self.refresh_input_cache();
                             }
-                            KeyCode::Left if self.cursor > 0 => self.cursor -= 1,
+                            KeyCode::Left if self.cursor > 0 => {
+                                self.cursor -= 1;
+                                self.reveal_paste_span_at_cursor(self.cursor);
+                            }
                             KeyCode::Right if self.cursor < self.input_buf.len() => {
                                 self.cursor += 1;
+                                self.reveal_paste_span_at_cursor(self.cursor);
                             }
                             KeyCode::Home => self.cursor = 0,
                             KeyCode::End => self.cursor = self.input_buf.len(),
@@ -941,6 +953,11 @@ impl RatatuiApp {
                     }
                 } else if let Event::Paste(text) = event {
                     self.handle_paste(&text);
+                    // Paste summaries are useful, but the transient animation
+                    // makes repeated large clipboard inserts feel sluggish.
+                    if self.paste_animating {
+                        self.finish_animation();
+                    }
                 } else if matches!(event, Event::Resize(_, _)) {
                     self.dirty = true;
                 }
@@ -1186,6 +1203,38 @@ impl RatatuiApp {
     /// (the user backspaced through all of it).
     fn trim_trailing_paste_span(&mut self) {
         self.paste_spans.retain(|s| s.len > 0);
+    }
+
+    /// Reveal the raw text for a summarized paste as soon as the user starts
+    /// navigating into it or editing against it.
+    fn reveal_paste_span_at_cursor(&mut self, pos: usize) {
+        if let Some(index) = self
+            .paste_spans
+            .iter()
+            .position(|span| pos >= span.start && pos < span.start + span.len)
+        {
+            self.paste_spans.remove(index);
+        }
+    }
+
+    fn reveal_paste_span_containing(&mut self, pos: usize) {
+        if let Some(index) = self
+            .paste_spans
+            .iter()
+            .position(|span| pos >= span.start && pos < span.start + span.len)
+        {
+            self.paste_spans.remove(index);
+        }
+    }
+
+    fn reveal_paste_span_interior(&mut self, pos: usize) {
+        if let Some(index) = self
+            .paste_spans
+            .iter()
+            .position(|span| pos > span.start && pos < span.start + span.len)
+        {
+            self.paste_spans.remove(index);
+        }
     }
 
     /// Build the display string for the input area.
@@ -5146,6 +5195,54 @@ mod tests {
 
         assert!(app.cached_input.ends_with('x'));
         assert_eq!(app.cached_input, format!("{}{}", "a".repeat(200), "x"));
+    }
+
+    #[test]
+    fn moving_cursor_into_summary_reveals_raw_text() {
+        let mut app = RatatuiApp::new("m".into(), "r".into(), None);
+        let original = "a".repeat(200);
+        app.handle_paste(&original);
+        app.finish_animation();
+
+        assert_eq!(app.paste_spans.len(), 1);
+        app.cursor = 0;
+        app.cursor += 1;
+        app.reveal_paste_span_at_cursor(app.cursor);
+
+        assert!(app.paste_spans.is_empty());
+        assert_eq!(app.paste_display_text(), original);
+    }
+
+    #[test]
+    fn delete_inside_summary_reveals_and_deletes_raw_text() {
+        let mut app = RatatuiApp::new("m".into(), "r".into(), None);
+        app.handle_paste(&"a".repeat(200));
+        app.finish_animation();
+
+        app.cursor = 100;
+        app.reveal_paste_span_containing(app.cursor);
+        app.input_buf.remove(app.cursor);
+        app.shift_paste_spans(app.cursor, -1);
+        app.refresh_input_cache();
+
+        assert!(app.paste_spans.is_empty());
+        assert_eq!(app.cached_input.len(), 199);
+    }
+
+    #[test]
+    fn typing_inside_summary_reveals_raw_text() {
+        let mut app = RatatuiApp::new("m".into(), "r".into(), None);
+        app.handle_paste(&"a".repeat(200));
+        app.finish_animation();
+
+        app.cursor = 100;
+        app.reveal_paste_span_interior(app.cursor);
+        app.input_buf.insert(app.cursor, 'b');
+        app.cursor += 1;
+        app.refresh_input_cache();
+
+        assert!(app.paste_spans.is_empty());
+        assert_eq!(app.cached_input.chars().nth(100), Some('b'));
     }
 
     #[test]
