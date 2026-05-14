@@ -4849,7 +4849,9 @@ mod tests {
             .into_iter()
             .map(|spec| spec.name)
             .collect::<Vec<_>>();
-        assert_eq!(names, vec!["read_file", "grep_search"]);
+        // Tools are sorted alphabetically by GlobalToolRegistry::definitions
+        // for byte-stable Anthropic prompt cache hits.
+        assert_eq!(names, vec!["grep_search", "read_file"]);
     }
 
     #[test]
