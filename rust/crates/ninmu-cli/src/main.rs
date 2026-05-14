@@ -474,7 +474,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         eprintln!("Failed to create RPC API client for {model}: {e}");
                         ninmu_sdk::BoxedApiClient::new(ninmu_sdk::DummyApiClient)
                     },
-                    ninmu_sdk::BoxedApiClient::new,
+                    |client| {
+                        // Wire the same tool registry the regular CLI uses so
+                        // the RPC mode emits identical wire payloads — keeps
+                        // Anthropic prompt-cache hits across modes. Falls back
+                        // to a tool-less client if registry construction fails.
+                        let tools = crate::app::build_runtime_plugin_state()
+                            .ok()
+                            .map(|state| state.tool_registry.definitions(None))
+                            .unwrap_or_default();
+                        ninmu_sdk::BoxedApiClient::new(client.with_tools(tools))
+                    },
                 )
             })))?;
         }

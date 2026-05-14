@@ -2990,6 +2990,45 @@ pub(crate) fn permission_policy(
     ))
 }
 
+/// Hard cap on individual tool-result wire payload, in characters.
+/// Large outputs (test runs, big file reads, recursive grep) blow up
+/// per-turn input cost. Capping at the wire deterministically keeps the
+/// stored session full-fidelity while bounding per-message cache cost.
+/// Matches DeepSeek-TUI's 12K budget.
+pub(crate) const TOOL_RESULT_WIRE_CHAR_BUDGET: usize = 12_000;
+const TOOL_RESULT_WIRE_HEAD_CHARS: usize = 4_000;
+const TOOL_RESULT_WIRE_TAIL_CHARS: usize = 4_000;
+
+/// Truncate a tool result for the wire by keeping the head and tail with a
+/// marker in the middle. Deterministic — same input always produces the
+/// same output, so the wire payload (and thus prompt cache prefix) stays
+/// byte-stable across turns.
+///
+/// We split on `char_indices` to avoid producing invalid UTF-8 if the cut
+/// would land mid-codepoint. Local stored history is unchanged; only the
+/// wire form is trimmed.
+pub(crate) fn cap_tool_result_for_wire(text: &str) -> String {
+    if text.chars().count() <= TOOL_RESULT_WIRE_CHAR_BUDGET {
+        return text.to_string();
+    }
+    let head_end = text
+        .char_indices()
+        .nth(TOOL_RESULT_WIRE_HEAD_CHARS)
+        .map_or(text.len(), |(i, _)| i);
+    let total_chars = text.chars().count();
+    let tail_skip = total_chars.saturating_sub(TOOL_RESULT_WIRE_TAIL_CHARS);
+    let tail_start = text
+        .char_indices()
+        .nth(tail_skip)
+        .map_or(text.len(), |(i, _)| i);
+    let omitted_chars = total_chars - TOOL_RESULT_WIRE_HEAD_CHARS - TOOL_RESULT_WIRE_TAIL_CHARS;
+    format!(
+        "{head}\n\n... [{omitted_chars} chars omitted; full output retained in local session] ...\n\n{tail}",
+        head = &text[..head_end],
+        tail = &text[tail_start..],
+    )
+}
+
 pub(crate) fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
     messages
         .iter()
@@ -3017,7 +3056,7 @@ pub(crate) fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMes
                     } => InputContentBlock::ToolResult {
                         tool_use_id: tool_use_id.clone(),
                         content: vec![ToolResultContentBlock::Text {
-                            text: output.clone(),
+                            text: cap_tool_result_for_wire(output),
                         }],
                         is_error: *is_error,
                     },
@@ -4021,9 +4060,150 @@ pub(crate) fn collect_prompt_cache_events(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_warmup_request, format_cache_break_warning, AnthropicRuntimeClient};
+    use super::{
+        build_warmup_request, cap_tool_result_for_wire, format_cache_break_warning,
+        AnthropicRuntimeClient, TOOL_RESULT_WIRE_CHAR_BUDGET,
+    };
     use ninmu_api::ToolDefinition;
     use ninmu_runtime::PromptCacheEvent;
+
+    #[test]
+    fn cap_tool_result_for_wire_passes_through_when_under_budget() {
+        let text = "small output";
+        assert_eq!(cap_tool_result_for_wire(text), text);
+    }
+
+    #[test]
+    fn cap_tool_result_for_wire_truncates_when_over_budget() {
+        let text = "x".repeat(TOOL_RESULT_WIRE_CHAR_BUDGET * 2);
+        let capped = cap_tool_result_for_wire(&text);
+        assert!(
+            capped.chars().count() < text.chars().count(),
+            "capped output should be shorter"
+        );
+        assert!(capped.contains("chars omitted"));
+        assert!(capped.contains("local session"));
+    }
+
+    #[test]
+    fn cap_tool_result_for_wire_keeps_head_and_tail() {
+        let mut text = String::new();
+        text.push_str(&"H".repeat(5_000));
+        text.push_str(&"M".repeat(20_000));
+        text.push_str(&"T".repeat(5_000));
+        let capped = cap_tool_result_for_wire(&text);
+        assert!(capped.starts_with("HHHH"), "head must be preserved");
+        assert!(capped.ends_with("TTTT"), "tail must be preserved");
+        assert!(
+            !capped.contains(&"M".repeat(100)),
+            "middle must be elided, not just trimmed"
+        );
+    }
+
+    #[test]
+    fn cap_tool_result_for_wire_is_deterministic() {
+        // Cache stability depends on byte-for-byte determinism: same
+        // input MUST produce same output across calls.
+        let text = "🦀".repeat(TOOL_RESULT_WIRE_CHAR_BUDGET * 2);
+        assert_eq!(
+            cap_tool_result_for_wire(&text),
+            cap_tool_result_for_wire(&text),
+            "wire-cap must be deterministic to preserve prompt cache"
+        );
+    }
+
+    #[test]
+    fn convert_messages_serializes_history_byte_stable_across_follow_up_turns() {
+        // Locks in the property that wire serialization of message N is
+        // independent of whether later messages exist. DeepSeek-TUI hit a
+        // bug where assistant JSON conditionally included `reasoning_content`
+        // based on whether a later user turn followed; that flipped bytes
+        // in cached prefixes between turns and silently destroyed the cache.
+        // We don't have that bug today — this test prevents it from creeping in.
+        use ninmu_runtime::{ContentBlock, ConversationMessage, MessageRole};
+
+        let history = vec![
+            ConversationMessage {
+                role: MessageRole::User,
+                blocks: vec![ContentBlock::Text {
+                    text: "Read the file".into(),
+                }],
+                usage: None,
+            },
+            ConversationMessage {
+                role: MessageRole::Assistant,
+                blocks: vec![
+                    ContentBlock::Thinking {
+                        thinking: "I should call read_file".into(),
+                    },
+                    ContentBlock::Text {
+                        text: "I'll read it now.".into(),
+                    },
+                    ContentBlock::ToolUse {
+                        id: "toolu_a".into(),
+                        name: "read_file".into(),
+                        input: r#"{"path":"foo.txt"}"#.into(),
+                    },
+                ],
+                usage: None,
+            },
+            ConversationMessage {
+                role: MessageRole::Tool,
+                blocks: vec![ContentBlock::ToolResult {
+                    tool_use_id: "toolu_a".into(),
+                    tool_name: "read_file".into(),
+                    output: "file contents here".into(),
+                    is_error: false,
+                }],
+                usage: None,
+            },
+        ];
+
+        let initial = super::convert_messages(&history);
+        let initial_json: Vec<String> = initial
+            .iter()
+            .map(|m| serde_json::to_string(m).expect("serialize"))
+            .collect();
+
+        // Append another user turn that would *follow* the historical block.
+        let mut extended = history.clone();
+        extended.push(ConversationMessage {
+            role: MessageRole::User,
+            blocks: vec![ContentBlock::Text {
+                text: "Now summarize it.".into(),
+            }],
+            usage: None,
+        });
+        let after = super::convert_messages(&extended);
+        let after_json: Vec<String> = after
+            .iter()
+            .map(|m| serde_json::to_string(m).expect("serialize"))
+            .collect();
+
+        // The first 3 messages must serialize identically — appending a turn
+        // must NEVER mutate the bytes of any earlier message in the wire
+        // payload, or Anthropic's prefix cache breaks silently.
+        assert_eq!(initial_json.len(), 3);
+        assert!(after_json.len() > initial_json.len());
+        for (i, (before, after)) in initial_json.iter().zip(after_json.iter()).enumerate() {
+            assert_eq!(
+                before, after,
+                "message {i} bytes drifted after appending a new turn — \
+                 this would silently break Anthropic prompt cache hits"
+            );
+        }
+    }
+
+    #[test]
+    fn cap_tool_result_for_wire_handles_multibyte_chars() {
+        // 4-byte codepoint at every char position; cuts must land on
+        // codepoint boundaries or this would panic / produce invalid UTF-8.
+        let text = "🦀".repeat(TOOL_RESULT_WIRE_CHAR_BUDGET + 100);
+        let capped = cap_tool_result_for_wire(&text);
+        // If we ever produced invalid UTF-8 this would have panicked above.
+        assert!(capped.starts_with('🦀'));
+        assert!(capped.ends_with('🦀'));
+    }
 
     #[test]
     fn anthropic_runtime_client_is_send() {

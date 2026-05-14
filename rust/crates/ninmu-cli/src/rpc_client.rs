@@ -6,8 +6,8 @@
 //! raw API calls and event conversion.
 
 use ninmu_api::{
-    MessageRequest, MessageResponse, OutputContentBlock, ProviderClient, ToolResultContentBlock,
-    Usage,
+    MessageRequest, MessageResponse, OutputContentBlock, ProviderClient, ToolChoice,
+    ToolDefinition, ToolResultContentBlock, Usage,
 };
 use ninmu_runtime::{
     ApiClient, ApiRequest, AssistantEvent, ContentBlock, ConversationMessage, MessageRole,
@@ -20,6 +20,11 @@ pub struct RpcApiClient {
     runtime: tokio::runtime::Runtime,
     client: ProviderClient,
     model: String,
+    /// Tool definitions sent on every request. Empty = no tools (matches
+    /// pre-existing behavior for callers that don't supply any). When set,
+    /// these are sent verbatim — the registry should already have applied
+    /// any allowlist filtering and alphabetical sort for cache stability.
+    tools: Vec<ToolDefinition>,
 }
 
 impl RpcApiClient {
@@ -45,30 +50,58 @@ impl RpcApiClient {
             runtime,
             client,
             model: resolved_model,
+            tools: Vec::new(),
         })
     }
+
+    /// Attach a sorted, allowlist-filtered tool list. Callers should pass
+    /// the same tools they would pass to a regular CLI session so the wire
+    /// payload (and therefore the prompt cache key) matches across modes.
+    #[must_use]
+    pub fn with_tools(mut self, tools: Vec<ToolDefinition>) -> Self {
+        self.tools = tools;
+        self
+    }
+}
+
+/// Pure helper that translates a runtime [`ApiRequest`] into the wire-level
+/// [`MessageRequest`]. Extracted from [`RpcApiClient::stream`] so the
+/// transformation is unit-testable without spinning up a tokio runtime or
+/// HTTP client.
+pub(crate) fn build_rpc_message_request(
+    model: &str,
+    tools: &[ToolDefinition],
+    request: ApiRequest,
+) -> Result<MessageRequest, RuntimeError> {
+    let tools = if tools.is_empty() {
+        None
+    } else {
+        Some(tools.to_vec())
+    };
+    let tool_choice = tools.as_ref().map(|_| ToolChoice::Auto);
+    Ok(MessageRequest {
+        model: model.to_string(),
+        max_tokens: 4096,
+        messages: request
+            .messages
+            .into_iter()
+            .map(conversation_message_to_input_message)
+            .collect::<Result<Vec<_>, _>>()?,
+        system: if request.system_prompt.is_empty() {
+            None
+        } else {
+            Some(request.system_prompt.join("\n\n"))
+        },
+        tools,
+        tool_choice,
+        stream: false,
+        ..Default::default()
+    })
 }
 
 impl ApiClient for RpcApiClient {
     fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
-        let message_request = MessageRequest {
-            model: self.model.clone(),
-            max_tokens: 4096,
-            messages: request
-                .messages
-                .into_iter()
-                .map(conversation_message_to_input_message)
-                .collect::<Result<Vec<_>, _>>()?,
-            system: if request.system_prompt.is_empty() {
-                None
-            } else {
-                Some(request.system_prompt.join("\n\n"))
-            },
-            tools: None,
-            tool_choice: None,
-            stream: false,
-            ..Default::default()
-        };
+        let message_request = build_rpc_message_request(&self.model, &self.tools, request)?;
 
         let response = self
             .runtime
@@ -189,4 +222,76 @@ fn prompt_cache_record_to_runtime_event(
         current_cache_read_input_tokens: cache_break.current_cache_read_input_tokens,
         token_drop: cache_break.token_drop,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_rpc_message_request;
+    use ninmu_api::{ToolChoice, ToolDefinition};
+    use ninmu_runtime::{ApiRequest, ConversationMessage, MessageRole};
+    use serde_json::json;
+
+    fn user_message(text: &str) -> ConversationMessage {
+        ConversationMessage {
+            role: MessageRole::User,
+            blocks: vec![ninmu_runtime::ContentBlock::Text {
+                text: text.to_string(),
+            }],
+            usage: None,
+        }
+    }
+
+    #[test]
+    fn build_rpc_message_request_omits_tools_when_empty() {
+        let req = ApiRequest {
+            messages: vec![user_message("hello")],
+            system_prompt: vec!["You are helpful".to_string()],
+        };
+        let out = build_rpc_message_request("claude-sonnet-4-6", &[], req).unwrap();
+        assert_eq!(out.tools, None, "no tools = no tool block in wire payload");
+        assert_eq!(out.tool_choice, None);
+    }
+
+    #[test]
+    fn build_rpc_message_request_passes_tools_through() {
+        let tools = vec![
+            ToolDefinition {
+                name: "grep_search".to_string(),
+                description: Some("search".to_string()),
+                input_schema: json!({"type": "object"}),
+            },
+            ToolDefinition {
+                name: "read_file".to_string(),
+                description: Some("read".to_string()),
+                input_schema: json!({"type": "object"}),
+            },
+        ];
+        let req = ApiRequest {
+            messages: vec![user_message("hi")],
+            system_prompt: vec!["sys".to_string()],
+        };
+        let out = build_rpc_message_request("claude-sonnet-4-6", &tools, req).unwrap();
+        assert_eq!(out.tools.as_deref(), Some(tools.as_slice()));
+        assert!(matches!(out.tool_choice, Some(ToolChoice::Auto)));
+    }
+
+    #[test]
+    fn build_rpc_message_request_joins_system_sections() {
+        let req = ApiRequest {
+            messages: vec![user_message("x")],
+            system_prompt: vec!["one".to_string(), "two".to_string()],
+        };
+        let out = build_rpc_message_request("model", &[], req).unwrap();
+        assert_eq!(out.system.as_deref(), Some("one\n\ntwo"));
+    }
+
+    #[test]
+    fn build_rpc_message_request_no_system_when_empty() {
+        let req = ApiRequest {
+            messages: vec![user_message("x")],
+            system_prompt: vec![],
+        };
+        let out = build_rpc_message_request("model", &[], req).unwrap();
+        assert_eq!(out.system, None);
+    }
 }
