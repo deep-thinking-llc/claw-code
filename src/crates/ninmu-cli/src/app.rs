@@ -160,6 +160,51 @@ fn get_pooled_client(
     }))
 }
 
+/// Build a low-cost cache-priming request that mirrors the system prompt and
+/// tool list of the upcoming first turn.
+///
+/// The warmup request is not user-facing — it just primes Anthropic's prompt
+/// cache so the user's first real turn hits the cache. We send a tiny `1`
+/// max_tokens with a throwaway user message; system + tools dominate the
+/// cost, which is what we want cached. Pure helper for testability.
+pub(crate) fn build_warmup_request(
+    model: &str,
+    system_prompt: &[String],
+    tools: Option<Vec<ToolDefinition>>,
+) -> MessageRequest {
+    MessageRequest {
+        model: model.to_string(),
+        max_tokens: 1,
+        messages: vec![InputMessage::user_text("warmup")],
+        system: (!system_prompt.is_empty()).then(|| system_prompt.join("\n\n")),
+        tools,
+        tool_choice: None,
+        stream: false,
+        temperature: Some(0.0),
+        ..Default::default()
+    }
+}
+
+/// Spawn a fire-and-forget cache-warmup request on the shared tokio runtime.
+/// Returns immediately; the warmup runs in the background and any failure is
+/// silently ignored (cache miss on first turn is the only consequence).
+///
+/// Set `NINMU_DISABLE_CACHE_WARMUP=1` to opt out — useful when iterating on
+/// prompt construction or when the user's account lacks Anthropic prompt
+/// caching beta access.
+fn spawn_cache_warmup(client: Arc<AnthropicClient>, request: MessageRequest) {
+    if std::env::var("NINMU_DISABLE_CACHE_WARMUP").is_ok() {
+        return;
+    }
+    let handle = TOKIO_RUNTIME
+        .get_or_init(|| tokio::runtime::Runtime::new().expect("tokio runtime"))
+        .handle()
+        .clone();
+    handle.spawn(async move {
+        let _ = client.warm_cache(&request).await;
+    });
+}
+
 impl LiveCli {
     pub(crate) fn new(
         model: String,
@@ -185,8 +230,19 @@ impl LiveCli {
             permission_mode,
             None,
             runtime_plugin_state.clone(),
-            shared_client,
+            shared_client.clone(),
         )?;
+
+        // Fire-and-forget cache warmup with the same system+tools the first
+        // turn will use. Doesn't block startup.
+        if let Some(client) = shared_client.as_ref() {
+            let warmup_tools = enable_tools.then(|| {
+                filter_tool_specs(&runtime_plugin_state.tool_registry, allowed_tools.as_ref())
+            });
+            let warmup = build_warmup_request(&model, &system_prompt, warmup_tools);
+            spawn_cache_warmup(Arc::clone(client), warmup);
+        }
+
         let cli = Self {
             model,
             allowed_tools,
@@ -2934,6 +2990,45 @@ pub(crate) fn permission_policy(
     ))
 }
 
+/// Hard cap on individual tool-result wire payload, in characters.
+/// Large outputs (test runs, big file reads, recursive grep) blow up
+/// per-turn input cost. Capping at the wire deterministically keeps the
+/// stored session full-fidelity while bounding per-message cache cost.
+/// Matches DeepSeek-TUI's 12K budget.
+pub(crate) const TOOL_RESULT_WIRE_CHAR_BUDGET: usize = 12_000;
+const TOOL_RESULT_WIRE_HEAD_CHARS: usize = 4_000;
+const TOOL_RESULT_WIRE_TAIL_CHARS: usize = 4_000;
+
+/// Truncate a tool result for the wire by keeping the head and tail with a
+/// marker in the middle. Deterministic — same input always produces the
+/// same output, so the wire payload (and thus prompt cache prefix) stays
+/// byte-stable across turns.
+///
+/// We split on `char_indices` to avoid producing invalid UTF-8 if the cut
+/// would land mid-codepoint. Local stored history is unchanged; only the
+/// wire form is trimmed.
+pub(crate) fn cap_tool_result_for_wire(text: &str) -> String {
+    if text.chars().count() <= TOOL_RESULT_WIRE_CHAR_BUDGET {
+        return text.to_string();
+    }
+    let head_end = text
+        .char_indices()
+        .nth(TOOL_RESULT_WIRE_HEAD_CHARS)
+        .map_or(text.len(), |(i, _)| i);
+    let total_chars = text.chars().count();
+    let tail_skip = total_chars.saturating_sub(TOOL_RESULT_WIRE_TAIL_CHARS);
+    let tail_start = text
+        .char_indices()
+        .nth(tail_skip)
+        .map_or(text.len(), |(i, _)| i);
+    let omitted_chars = total_chars - TOOL_RESULT_WIRE_HEAD_CHARS - TOOL_RESULT_WIRE_TAIL_CHARS;
+    format!(
+        "{head}\n\n... [{omitted_chars} chars omitted; full output retained in local session] ...\n\n{tail}",
+        head = &text[..head_end],
+        tail = &text[tail_start..],
+    )
+}
+
 pub(crate) fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
     messages
         .iter()
@@ -2961,7 +3056,7 @@ pub(crate) fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMes
                     } => InputContentBlock::ToolResult {
                         tool_use_id: tool_use_id.clone(),
                         content: vec![ToolResultContentBlock::Text {
-                            text: output.clone(),
+                            text: cap_tool_result_for_wire(output),
                         }],
                         is_error: *is_error,
                     },
@@ -3965,13 +4060,190 @@ pub(crate) fn collect_prompt_cache_events(
 
 #[cfg(test)]
 mod tests {
-    use super::{format_cache_break_warning, AnthropicRuntimeClient};
+    use super::{
+        build_warmup_request, cap_tool_result_for_wire, format_cache_break_warning,
+        AnthropicRuntimeClient, TOOL_RESULT_WIRE_CHAR_BUDGET,
+    };
+    use ninmu_api::ToolDefinition;
     use ninmu_runtime::PromptCacheEvent;
+
+    #[test]
+    fn cap_tool_result_for_wire_passes_through_when_under_budget() {
+        let text = "small output";
+        assert_eq!(cap_tool_result_for_wire(text), text);
+    }
+
+    #[test]
+    fn cap_tool_result_for_wire_truncates_when_over_budget() {
+        let text = "x".repeat(TOOL_RESULT_WIRE_CHAR_BUDGET * 2);
+        let capped = cap_tool_result_for_wire(&text);
+        assert!(
+            capped.chars().count() < text.chars().count(),
+            "capped output should be shorter"
+        );
+        assert!(capped.contains("chars omitted"));
+        assert!(capped.contains("local session"));
+    }
+
+    #[test]
+    fn cap_tool_result_for_wire_keeps_head_and_tail() {
+        let mut text = String::new();
+        text.push_str(&"H".repeat(5_000));
+        text.push_str(&"M".repeat(20_000));
+        text.push_str(&"T".repeat(5_000));
+        let capped = cap_tool_result_for_wire(&text);
+        assert!(capped.starts_with("HHHH"), "head must be preserved");
+        assert!(capped.ends_with("TTTT"), "tail must be preserved");
+        assert!(
+            !capped.contains(&"M".repeat(100)),
+            "middle must be elided, not just trimmed"
+        );
+    }
+
+    #[test]
+    fn cap_tool_result_for_wire_is_deterministic() {
+        // Cache stability depends on byte-for-byte determinism: same
+        // input MUST produce same output across calls.
+        let text = "🦀".repeat(TOOL_RESULT_WIRE_CHAR_BUDGET * 2);
+        assert_eq!(
+            cap_tool_result_for_wire(&text),
+            cap_tool_result_for_wire(&text),
+            "wire-cap must be deterministic to preserve prompt cache"
+        );
+    }
+
+    #[test]
+    fn convert_messages_serializes_history_byte_stable_across_follow_up_turns() {
+        // Locks in the property that wire serialization of message N is
+        // independent of whether later messages exist. DeepSeek-TUI hit a
+        // bug where assistant JSON conditionally included `reasoning_content`
+        // based on whether a later user turn followed; that flipped bytes
+        // in cached prefixes between turns and silently destroyed the cache.
+        // We don't have that bug today — this test prevents it from creeping in.
+        use ninmu_runtime::{ContentBlock, ConversationMessage, MessageRole};
+
+        let history = vec![
+            ConversationMessage {
+                role: MessageRole::User,
+                blocks: vec![ContentBlock::Text {
+                    text: "Read the file".into(),
+                }],
+                usage: None,
+            },
+            ConversationMessage {
+                role: MessageRole::Assistant,
+                blocks: vec![
+                    ContentBlock::Thinking {
+                        thinking: "I should call read_file".into(),
+                    },
+                    ContentBlock::Text {
+                        text: "I'll read it now.".into(),
+                    },
+                    ContentBlock::ToolUse {
+                        id: "toolu_a".into(),
+                        name: "read_file".into(),
+                        input: r#"{"path":"foo.txt"}"#.into(),
+                    },
+                ],
+                usage: None,
+            },
+            ConversationMessage {
+                role: MessageRole::Tool,
+                blocks: vec![ContentBlock::ToolResult {
+                    tool_use_id: "toolu_a".into(),
+                    tool_name: "read_file".into(),
+                    output: "file contents here".into(),
+                    is_error: false,
+                }],
+                usage: None,
+            },
+        ];
+
+        let initial = super::convert_messages(&history);
+        let initial_json: Vec<String> = initial
+            .iter()
+            .map(|m| serde_json::to_string(m).expect("serialize"))
+            .collect();
+
+        // Append another user turn that would *follow* the historical block.
+        let mut extended = history.clone();
+        extended.push(ConversationMessage {
+            role: MessageRole::User,
+            blocks: vec![ContentBlock::Text {
+                text: "Now summarize it.".into(),
+            }],
+            usage: None,
+        });
+        let after = super::convert_messages(&extended);
+        let after_json: Vec<String> = after
+            .iter()
+            .map(|m| serde_json::to_string(m).expect("serialize"))
+            .collect();
+
+        // The first 3 messages must serialize identically — appending a turn
+        // must NEVER mutate the bytes of any earlier message in the wire
+        // payload, or Anthropic's prefix cache breaks silently.
+        assert_eq!(initial_json.len(), 3);
+        assert!(after_json.len() > initial_json.len());
+        for (i, (before, after)) in initial_json.iter().zip(after_json.iter()).enumerate() {
+            assert_eq!(
+                before, after,
+                "message {i} bytes drifted after appending a new turn — \
+                 this would silently break Anthropic prompt cache hits"
+            );
+        }
+    }
+
+    #[test]
+    fn cap_tool_result_for_wire_handles_multibyte_chars() {
+        // 4-byte codepoint at every char position; cuts must land on
+        // codepoint boundaries or this would panic / produce invalid UTF-8.
+        let text = "🦀".repeat(TOOL_RESULT_WIRE_CHAR_BUDGET + 100);
+        let capped = cap_tool_result_for_wire(&text);
+        // If we ever produced invalid UTF-8 this would have panicked above.
+        assert!(capped.starts_with('🦀'));
+        assert!(capped.ends_with('🦀'));
+    }
 
     #[test]
     fn anthropic_runtime_client_is_send() {
         fn assert_send<T: Send>() {}
         assert_send::<AnthropicRuntimeClient>();
+    }
+
+    #[test]
+    fn build_warmup_request_uses_minimal_max_tokens_and_carries_system_and_tools() {
+        let system = vec!["You are helpful".to_string(), "Section 2".to_string()];
+        let tools = vec![ToolDefinition {
+            name: "read_file".to_string(),
+            description: Some("Read a file".to_string()),
+            input_schema: serde_json::json!({"type": "object"}),
+        }];
+        let req = build_warmup_request("claude-sonnet-4-6", &system, Some(tools.clone()));
+
+        assert_eq!(req.model, "claude-sonnet-4-6");
+        assert_eq!(req.max_tokens, 1, "warmup should request minimal output");
+        assert_eq!(
+            req.system.as_deref(),
+            Some("You are helpful\n\nSection 2"),
+            "system sections should be joined"
+        );
+        assert_eq!(
+            req.tools,
+            Some(tools),
+            "tools should be passed through so they get into the cached prefix"
+        );
+        assert_eq!(req.messages.len(), 1, "warmup needs one user message");
+        assert!(!req.stream, "warmup must not stream");
+        assert_eq!(req.temperature, Some(0.0));
+    }
+
+    #[test]
+    fn build_warmup_request_with_no_system_emits_none() {
+        let req = build_warmup_request("claude-sonnet-4-6", &[], None);
+        assert_eq!(req.system, None);
+        assert_eq!(req.tools, None);
+        assert_eq!(req.max_tokens, 1);
     }
 
     #[test]

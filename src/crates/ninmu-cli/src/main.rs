@@ -474,7 +474,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         eprintln!("Failed to create RPC API client for {model}: {e}");
                         ninmu_sdk::BoxedApiClient::new(ninmu_sdk::DummyApiClient)
                     },
-                    ninmu_sdk::BoxedApiClient::new,
+                    |client| {
+                        // Wire the same tool registry the regular CLI uses so
+                        // the RPC mode emits identical wire payloads — keeps
+                        // Anthropic prompt-cache hits across modes. Falls back
+                        // to a tool-less client if registry construction fails.
+                        let tools = crate::app::build_runtime_plugin_state()
+                            .ok()
+                            .map(|state| state.tool_registry.definitions(None))
+                            .unwrap_or_default();
+                        ninmu_sdk::BoxedApiClient::new(client.with_tools(tools))
+                    },
                 )
             })))?;
         }
@@ -4849,7 +4859,9 @@ mod tests {
             .into_iter()
             .map(|spec| spec.name)
             .collect::<Vec<_>>();
-        assert_eq!(names, vec!["read_file", "grep_search"]);
+        // Tools are sorted alphabetically by GlobalToolRegistry::definitions
+        // for byte-stable Anthropic prompt cache hits.
+        assert_eq!(names, vec!["grep_search", "read_file"]);
     }
 
     #[test]
@@ -5115,6 +5127,20 @@ mod tests {
         assert!(report.contains("Cache create     3"));
         assert!(report.contains("Cache read       1"));
         assert!(report.contains("Total tokens     32"));
+        // Cache hit rate = 1 / (20 + 3 + 1) = 4.2%
+        assert!(
+            report.contains("Cache hit rate   4.2%"),
+            "expected cache hit rate line, got: {report}"
+        );
+    }
+
+    #[test]
+    fn cost_report_omits_cache_hit_rate_when_no_input_activity() {
+        let report = format_cost_report(ninmu_runtime::TokenUsage::default());
+        assert!(
+            !report.contains("Cache hit rate"),
+            "cache hit rate should be hidden for empty usage to avoid misleading 0%, got: {report}"
+        );
     }
 
     #[test]

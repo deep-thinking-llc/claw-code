@@ -4,13 +4,17 @@ pub(crate) const PRIMARY_SESSION_EXTENSION: &str = "jsonl";
 pub(crate) const LATEST_SESSION_REFERENCE: &str = "latest";
 
 pub(crate) fn format_cost_report(usage: TokenUsage) -> String {
+    let cache_hit_line = match usage.cache_hit_ratio() {
+        Some(ratio) => format!("\n  Cache hit rate   {:.1}%", ratio * 100.0),
+        None => String::new(),
+    };
     format!(
         "Cost
   Input tokens     {}
   Output tokens    {}
   Cache create     {}
   Cache read       {}
-  Total tokens     {}",
+  Total tokens     {}{cache_hit_line}",
         usage.input_tokens,
         usage.output_tokens,
         usage.cache_creation_input_tokens,

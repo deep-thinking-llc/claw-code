@@ -253,6 +253,12 @@ fn read_git_status(cwd: &Path) -> Option<String> {
     }
 }
 
+/// Hard cap on the total git-diff bytes embedded in the system prompt.
+/// Diffs larger than this are truncated with a marker. Keeps the prompt
+/// from ballooning during large refactors and limits the cache-invalidation
+/// blast radius of any in-flight diff change.
+const GIT_DIFF_MAX_BYTES: usize = 8 * 1024;
+
 fn read_git_diff(cwd: &Path) -> Option<String> {
     let mut sections = Vec::new();
 
@@ -269,8 +275,30 @@ fn read_git_diff(cwd: &Path) -> Option<String> {
     if sections.is_empty() {
         None
     } else {
-        Some(sections.join("\n\n"))
+        Some(cap_git_diff(&sections.join("\n\n"), GIT_DIFF_MAX_BYTES))
     }
+}
+
+/// Truncate `text` to at most `max_bytes` bytes, splitting only on a UTF-8
+/// char boundary so we never produce invalid UTF-8. When truncation occurs,
+/// append a marker indicating how many bytes were elided.
+fn cap_git_diff(text: &str, max_bytes: usize) -> String {
+    use std::fmt::Write;
+    if text.len() <= max_bytes {
+        return text.to_string();
+    }
+    // Find the largest char boundary ≤ max_bytes by walking char_indices.
+    let cut = text
+        .char_indices()
+        .map(|(i, _)| i)
+        .take_while(|&i| i <= max_bytes)
+        .last()
+        .unwrap_or(0);
+    let elided = text.len() - cut;
+    let mut out = String::with_capacity(cut + 64);
+    out.push_str(&text[..cut]);
+    let _ = write!(out, "\n... [diff truncated, {elided} more bytes]");
+    out
 }
 
 fn read_git_output(cwd: &Path, args: &[&str]) -> Option<String> {
@@ -535,7 +563,7 @@ fn get_actions_section() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        collapse_blank_lines, display_context_path, normalize_instruction_content,
+        cap_git_diff, collapse_blank_lines, display_context_path, normalize_instruction_content,
         render_instruction_content, render_instruction_files, truncate_instruction_content,
         ContextFile, ProjectContext, SystemPromptBuilder, SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
     };
@@ -880,6 +908,82 @@ mod tests {
         assert!(prompt.contains(SYSTEM_PROMPT_DYNAMIC_BOUNDARY));
 
         fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn cap_git_diff_returns_input_unchanged_when_under_cap() {
+        let text = "diff --git a/x b/x\n+ hello";
+        let capped = cap_git_diff(text, 1024);
+        assert_eq!(capped, text);
+    }
+
+    #[test]
+    fn cap_git_diff_truncates_and_appends_marker_when_over_cap() {
+        let text = "x".repeat(10_000);
+        let capped = cap_git_diff(&text, 1024);
+        assert!(capped.len() < text.len());
+        assert!(
+            capped.contains("[diff truncated,"),
+            "truncation marker should be present"
+        );
+        assert!(
+            capped.contains("more bytes]"),
+            "truncation marker should report elided byte count"
+        );
+    }
+
+    #[test]
+    fn cap_git_diff_handles_utf8_boundary() {
+        // 4-byte UTF-8 char (emoji) repeated; cap at a value that lands
+        // inside one of the chars to ensure we don't slice mid-codepoint.
+        let text = "🦀".repeat(100); // 400 bytes total, 4 bytes per char
+        let capped = cap_git_diff(&text, 13); // mid-char boundary
+                                              // Must be valid UTF-8 (cap_git_diff returns String, so any invalid
+                                              // slice would have panicked). Just confirm the content body is
+                                              // composed of whole crab emojis up to the truncation marker.
+        let body = capped.split("\n... [diff truncated").next().unwrap();
+        assert!(
+            body.chars().all(|c| c == '🦀'),
+            "truncated body should contain only whole codepoints, got: {body:?}"
+        );
+        assert!(body.len() <= 13);
+    }
+
+    #[test]
+    fn cap_git_diff_at_exact_byte_boundary_does_not_truncate() {
+        let text = "abcdef"; // 6 bytes
+        let capped = cap_git_diff(text, 6);
+        assert_eq!(
+            capped, text,
+            "exact-fit input should pass through unchanged"
+        );
+    }
+
+    #[test]
+    fn built_prompt_places_dynamic_boundary_before_project_context() {
+        // Regression: project context (containing git status/diff) must sit
+        // AFTER the boundary marker so it lands in the volatile half. If
+        // anyone reorders the sections, prompt caching breaks silently.
+        let root = temp_dir();
+        fs::create_dir_all(&root).expect("temp dir");
+        let project_context =
+            ProjectContext::discover(&root, "2026-03-31").expect("context should load");
+        let prompt = SystemPromptBuilder::new()
+            .with_project_context(project_context)
+            .render();
+
+        let boundary_idx = prompt
+            .find(SYSTEM_PROMPT_DYNAMIC_BOUNDARY)
+            .expect("boundary marker should be in prompt");
+        let project_idx = prompt
+            .find("# Project context")
+            .expect("project context section should be in prompt");
+        assert!(
+            boundary_idx < project_idx,
+            "dynamic boundary at {boundary_idx} must appear before project context at {project_idx}"
+        );
+
+        fs::remove_dir_all(root).ok();
     }
 
     #[test]

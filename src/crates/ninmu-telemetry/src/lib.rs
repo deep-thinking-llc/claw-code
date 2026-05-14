@@ -14,6 +14,7 @@ pub const DEFAULT_APP_NAME: &str = "claude-code";
 pub const DEFAULT_RUNTIME: &str = "rust";
 pub const DEFAULT_AGENTIC_BETA: &str = "claude-code-20250219";
 pub const DEFAULT_PROMPT_CACHING_SCOPE_BETA: &str = "prompt-caching-scope-2026-01-05";
+pub const DEFAULT_EXTENDED_CACHE_TTL_BETA: &str = "extended-cache-ttl-2025-04-11";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientIdentity {
@@ -70,6 +71,7 @@ impl AnthropicRequestProfile {
                 DEFAULT_AGENTIC_BETA.to_string(),
                 DEFAULT_PROMPT_CACHING_SCOPE_BETA.to_string(),
                 "prompt-caching-2024-07-31".to_string(),
+                DEFAULT_EXTENDED_CACHE_TTL_BETA.to_string(),
             ],
             extra_body: Map::new(),
         }
@@ -450,7 +452,7 @@ mod tests {
                 ("user-agent".to_string(), "claude-code/1.2.3".to_string()),
                 (
                     "anthropic-beta".to_string(),
-                    "claude-code-20250219,prompt-caching-scope-2026-01-05,prompt-caching-2024-07-31,tools-2026-04-01"
+                    "claude-code-20250219,prompt-caching-scope-2026-01-05,prompt-caching-2024-07-31,extended-cache-ttl-2025-04-11,tools-2026-04-01"
                         .to_string(),
                 ),
             ]
@@ -469,8 +471,22 @@ mod tests {
                 "claude-code-20250219",
                 "prompt-caching-scope-2026-01-05",
                 "prompt-caching-2024-07-31",
+                "extended-cache-ttl-2025-04-11",
                 "tools-2026-04-01"
             ])
+        );
+    }
+
+    #[test]
+    fn default_beta_headers_include_extended_cache_ttl() {
+        let identity = ClientIdentity::new("claude-code", "1.0.0");
+        let profile = AnthropicRequestProfile::new(identity);
+        assert!(
+            profile
+                .betas
+                .iter()
+                .any(|b| b == DEFAULT_EXTENDED_CACHE_TTL_BETA),
+            "default beta list must include {DEFAULT_EXTENDED_CACHE_TTL_BETA}",
         );
     }
 

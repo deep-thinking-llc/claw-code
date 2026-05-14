@@ -274,7 +274,12 @@ impl GlobalToolRegistry {
                 description: tool.definition().description.clone(),
                 input_schema: tool.definition().input_schema.clone(),
             });
-        builtin.chain(runtime).chain(plugin).collect()
+        // Sort by name so the wire payload is byte-stable across plugin/MCP
+        // discovery races. Anthropic prompt caching is byte-keyed: any
+        // reordering of the tools array invalidates the cached prefix.
+        let mut tools: Vec<ToolDefinition> = builtin.chain(runtime).chain(plugin).collect();
+        tools.sort_by(|a, b| a.name.cmp(&b.name));
+        tools
     }
 
     pub fn permission_specs(
@@ -6883,6 +6888,42 @@ mod tests {
         let empty_permission =
             permission_mode_from_plugin("").expect_err("empty plugin permission should fail");
         assert!(empty_permission.contains("unsupported plugin permission: "));
+    }
+
+    #[test]
+    fn definitions_returns_tools_sorted_by_name() {
+        // Register runtime tools in deliberately non-alphabetical order to
+        // simulate the MCP discovery race that motivated this guarantee.
+        // Output must be alphabetical so the wire payload is byte-stable
+        // for Anthropic prompt caching.
+        let registry = GlobalToolRegistry::builtin()
+            .with_runtime_tools(vec![
+                super::RuntimeToolDefinition {
+                    name: "mcp__zeta__last".to_string(),
+                    description: None,
+                    input_schema: json!({"type": "object"}),
+                    required_permission: ninmu_runtime::PermissionMode::ReadOnly,
+                },
+                super::RuntimeToolDefinition {
+                    name: "mcp__alpha__first".to_string(),
+                    description: None,
+                    input_schema: json!({"type": "object"}),
+                    required_permission: ninmu_runtime::PermissionMode::ReadOnly,
+                },
+                super::RuntimeToolDefinition {
+                    name: "mcp__mu__middle".to_string(),
+                    description: None,
+                    input_schema: json!({"type": "object"}),
+                    required_permission: ninmu_runtime::PermissionMode::ReadOnly,
+                },
+            ])
+            .expect("runtime tools should register");
+
+        let definitions = registry.definitions(None);
+        let names: Vec<&str> = definitions.iter().map(|d| d.name.as_str()).collect();
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        assert_eq!(names, sorted, "definitions must be sorted by name");
     }
 
     #[test]

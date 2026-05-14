@@ -6,7 +6,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use ninmu_runtime::format_usd;
 use ninmu_runtime::{
     load_oauth_credentials, save_oauth_credentials, OAuthConfig, OAuthRefreshRequest,
-    OAuthTokenExchangeRequest,
+    OAuthTokenExchangeRequest, SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
 };
 use ninmu_telemetry::{AnalyticsEvent, AnthropicRequestProfile, ClientIdentity, SessionTracer};
 use serde::Deserialize;
@@ -125,6 +125,7 @@ pub struct AnthropicClient {
     last_prompt_cache_record: Arc<Mutex<Option<PromptCacheRecord>>>,
     last_request_time: Arc<Mutex<Option<Instant>>>,
     cache_ttl: Option<String>,
+    disable_extended_cache_ttl: bool,
 }
 
 impl AnthropicClient {
@@ -143,6 +144,7 @@ impl AnthropicClient {
             last_prompt_cache_record: Arc::new(Mutex::new(None)),
             last_request_time: Arc::new(Mutex::new(None)),
             cache_ttl: std::env::var("NINMU_CACHE_TTL").ok(),
+            disable_extended_cache_ttl: std::env::var("NINMU_DISABLE_EXTENDED_CACHE_TTL").is_ok(),
         }
     }
 
@@ -161,6 +163,7 @@ impl AnthropicClient {
             last_prompt_cache_record: Arc::new(Mutex::new(None)),
             last_request_time: Arc::new(Mutex::new(None)),
             cache_ttl: std::env::var("NINMU_CACHE_TTL").ok(),
+            disable_extended_cache_ttl: std::env::var("NINMU_DISABLE_EXTENDED_CACHE_TTL").is_ok(),
         }
     }
 
@@ -251,6 +254,16 @@ impl AnthropicClient {
     #[must_use]
     pub fn with_cache_ttl(mut self, ttl: Option<String>) -> Self {
         self.cache_ttl = ttl;
+        self
+    }
+
+    /// Override the `extended-cache-ttl-2025-04-11` opt-out. When `true`,
+    /// `cache_control_options()` returns `global_ttl: None`. Mirrors the
+    /// `NINMU_DISABLE_EXTENDED_CACHE_TTL` env var; intended for tests and
+    /// for users whose Anthropic account doesn't have the beta enabled.
+    #[must_use]
+    pub fn with_extended_cache_ttl_disabled(mut self, disabled: bool) -> Self {
+        self.disable_extended_cache_ttl = disabled;
         self
     }
 
@@ -620,15 +633,28 @@ impl AnthropicClient {
 
     /// Return the [`CacheControlOptions`] derived from this client's
     /// configuration.
+    ///
+    /// Global breakpoints (system + tools) default to a 1h TTL — these
+    /// prefixes change rarely between turns and benefit greatly from
+    /// extension. Users can override via `with_cache_ttl(...)`, which sets
+    /// `global_ttl`. Setting `NINMU_DISABLE_EXTENDED_CACHE_TTL=1` falls back
+    /// to no TTL (5 min default), useful if the account lacks the
+    /// `extended-cache-ttl-2025-04-11` beta.
     #[must_use]
     pub fn cache_control_options(&self) -> CacheControlOptions {
         let enable_scope = self
             .request_profile
             .betas
             .contains(&"prompt-caching-scope-2026-01-05".to_string());
+        let global_ttl = if self.disable_extended_cache_ttl {
+            None
+        } else {
+            self.cache_ttl.clone().or_else(|| Some("1h".to_string()))
+        };
         CacheControlOptions {
             enable_scope,
-            ttl: self.cache_ttl.clone(),
+            global_ttl,
+            turn_ttl: None,
         }
     }
 
@@ -1101,18 +1127,34 @@ pub struct CacheControlOptions {
     /// `"scope": "turn"` to messages so that Anthropic can differentiate
     /// long-lived context (system, tools) from per-turn context (messages).
     pub enable_scope: bool,
-    /// Optional TTL string (e.g. `"1h"`, `"15m"`) forwarded as
-    /// `"ttl": "..."` inside each `cache_control` block.
-    pub ttl: Option<String>,
+    /// TTL applied to **global-scope** cache breakpoints (system + tools).
+    /// Forwarded as `"ttl": "..."` (e.g. `"1h"`, `"15m"`). `None` falls back
+    /// to the API default (5 min). Long-lived prefixes benefit most from
+    /// extension, so production callers typically set `Some("1h")`. Requires
+    /// the `extended-cache-ttl-2025-04-11` beta header for non-default TTLs.
+    pub global_ttl: Option<String>,
+    /// TTL applied to **turn-scope** cache breakpoints (message history).
+    /// `None` is the right default — message prefixes churn fast and rarely
+    /// benefit from a longer TTL.
+    pub turn_ttl: Option<String>,
 }
 
 /// Inject `cache_control: {type: "ephemeral"}` into the request body for
 /// Anthropic prompt caching. This mutates the JSON value in-place.
 ///
-/// Strategy:
-/// - Convert `system` string → array of text blocks with `cache_control`.
-/// - Add `cache_control` to all tool definitions.
-/// - Add `cache_control` to all message content blocks except the last 2 messages.
+/// Anthropic enforces a **maximum of 4 `cache_control` breakpoints per
+/// request**. Each breakpoint caches the entire prefix up to and including
+/// the marked block, so we only need to mark the *last* block in each stable
+/// section — not every block.
+///
+/// Strategy (uses at most 4 breakpoints regardless of tool/message count):
+/// - Convert `system` string → array of text blocks. If the string contains
+///   [`SYSTEM_PROMPT_DYNAMIC_BOUNDARY`], split into 2 text blocks (static
+///   prefix + dynamic tail) and mark BOTH so the static prefix stays cached
+///   even when the dynamic tail churns. Otherwise emit one block + one mark.
+/// - Mark only the **last** tool definition (caches all tools before it).
+/// - Mark the last cacheable message (skipping the final 2 to keep them out
+///   of the prefix so future turns can still hit the cache).
 pub fn inject_prompt_cache_control(body: &mut Value) {
     inject_prompt_cache_control_with_options(body, &CacheControlOptions::default());
 }
@@ -1127,36 +1169,43 @@ pub fn inject_prompt_cache_control_with_options(body: &mut Value, options: &Cach
     let global_cc = make_cache_control_value(options, true);
     let turn_cc = make_cache_control_value(options, false);
 
-    // 1. System prompt: convert string to array of blocks with cache_control.
+    // 1. System prompt: convert string to array; mark text blocks.
     if let Some(system) = object.get_mut("system") {
         if let Some(text) = system.as_str() {
-            *system = json!([{
-                "type": "text",
-                "text": text,
-                "cache_control": global_cc.clone()
-            }]);
+            *system = build_system_blocks(text, &global_cc);
+        } else if let Some(array) = system.as_array_mut() {
+            if let Some(last) = array.last_mut() {
+                if let Some(obj) = last.as_object_mut() {
+                    obj.insert("cache_control".to_string(), global_cc.clone());
+                }
+            }
         }
     }
 
-    // 2. Tool definitions: add cache_control to each tool.
+    // 2. Tool definitions: mark only the last tool. The cache prefix covers
+    //    every tool before it, so one breakpoint is enough.
     if let Some(tools) = object.get_mut("tools") {
         if let Some(array) = tools.as_array_mut() {
-            for tool in array {
-                if let Some(tool_obj) = tool.as_object_mut() {
+            if let Some(last) = array.last_mut() {
+                if let Some(tool_obj) = last.as_object_mut() {
                     tool_obj.insert("cache_control".to_string(), global_cc.clone());
                 }
             }
         }
     }
 
-    // 3. Messages: add cache_control to all but the last 2 messages.
+    // 3. Messages: mark only the last cacheable message (skipping final 2).
+    //    This caches the conversation prefix up to that point with a single
+    //    breakpoint, leaving budget under the 4-breakpoint API limit.
     if let Some(messages) = object.get_mut("messages") {
         if let Some(array) = messages.as_array_mut() {
             let cacheable_count = array.len().saturating_sub(2);
-            for msg in array.iter_mut().take(cacheable_count) {
-                if let Some(msg_obj) = msg.as_object_mut() {
-                    if let Some(content) = msg_obj.get_mut("content") {
-                        inject_cache_control_into_content_with_options(content, &turn_cc);
+            if cacheable_count > 0 {
+                if let Some(msg) = array.get_mut(cacheable_count - 1) {
+                    if let Some(msg_obj) = msg.as_object_mut() {
+                        if let Some(content) = msg_obj.get_mut("content") {
+                            inject_cache_control_into_last_block(content, &turn_cc);
+                        }
                     }
                 }
             }
@@ -1164,10 +1213,45 @@ pub fn inject_prompt_cache_control_with_options(body: &mut Value, options: &Cach
     }
 }
 
+/// Convert a system prompt string into an array of text blocks for the
+/// Anthropic API, attaching `cache_control` markers.
+///
+/// If the string contains [`SYSTEM_PROMPT_DYNAMIC_BOUNDARY`], split into two
+/// text blocks at the marker. Both blocks get `cache_control` (using 2 of 4
+/// breakpoints), so the static prefix stays cached even when the dynamic
+/// tail (env, project context, git status) changes between turns.
+///
+/// Otherwise emit a single text block with one `cache_control` marker.
+fn build_system_blocks(text: &str, cache_control: &Value) -> Value {
+    if let Some((static_prefix, dynamic_tail)) = text.split_once(SYSTEM_PROMPT_DYNAMIC_BOUNDARY) {
+        // Trim only the immediate marker boundary so we don't strip
+        // intentional spacing within either side.
+        let static_text = static_prefix.trim_end_matches(['\n', ' ', '\t']);
+        let dynamic_text = dynamic_tail.trim_start_matches(['\n', ' ', '\t']);
+        return json!([
+            {
+                "type": "text",
+                "text": static_text,
+                "cache_control": cache_control.clone(),
+            },
+            {
+                "type": "text",
+                "text": dynamic_text,
+                "cache_control": cache_control.clone(),
+            },
+        ]);
+    }
+    json!([{
+        "type": "text",
+        "text": text,
+        "cache_control": cache_control.clone(),
+    }])
+}
+
 /// Build a `cache_control` JSON value from [`CacheControlOptions`].
 ///
-/// `is_global` controls the `"scope"` field: `"global"` for system/tools,
-/// `"turn"` for messages.
+/// `is_global` controls the `"scope"` field (`"global"` for system/tools,
+/// `"turn"` for messages) AND which TTL is read (`global_ttl` vs `turn_ttl`).
 fn make_cache_control_value(options: &CacheControlOptions, is_global: bool) -> Value {
     let mut obj = serde_json::Map::new();
     obj.insert("type".to_string(), json!("ephemeral"));
@@ -1177,14 +1261,21 @@ fn make_cache_control_value(options: &CacheControlOptions, is_global: bool) -> V
             json!(if is_global { "global" } else { "turn" }),
         );
     }
-    if let Some(ref ttl) = options.ttl {
+    let ttl = if is_global {
+        options.global_ttl.as_ref()
+    } else {
+        options.turn_ttl.as_ref()
+    };
+    if let Some(ttl) = ttl {
         obj.insert("ttl".to_string(), json!(ttl));
     }
     Value::Object(obj)
 }
 
-/// Recursively add `cache_control` to all `text`/`tool_use` content blocks.
-fn inject_cache_control_into_content_with_options(content: &mut Value, cache_control: &Value) {
+/// Add `cache_control` to the last cacheable (`text`/`tool_use`) block in a
+/// message's content. Used to place a single breakpoint per message instead
+/// of one per content block (the Anthropic API caps total breakpoints at 4).
+fn inject_cache_control_into_last_block(content: &mut Value, cache_control: &Value) {
     if let Some(text) = content.as_str() {
         *content = json!([{
             "type": "text",
@@ -1194,11 +1285,12 @@ fn inject_cache_control_into_content_with_options(content: &mut Value, cache_con
         return;
     }
     if let Some(array) = content.as_array_mut() {
-        for block in array {
+        for block in array.iter_mut().rev() {
             if let Some(obj) = block.as_object_mut() {
                 let block_type = obj.get("type").and_then(|t| t.as_str());
                 if block_type == Some("text") || block_type == Some("tool_use") {
                     obj.insert("cache_control".to_string(), cache_control.clone());
+                    return;
                 }
             }
         }
@@ -1980,6 +2072,305 @@ mod tests {
         // With only 1 message, no messages get cache_control (all are in last 2)
         let messages = body.get("messages").unwrap().as_array().unwrap();
         assert!(messages[0]["content"].is_string());
+    }
+
+    fn count_cache_control(v: &serde_json::Value) -> usize {
+        match v {
+            serde_json::Value::Object(map) => {
+                let here = usize::from(map.contains_key("cache_control"));
+                here + map.values().map(count_cache_control).sum::<usize>()
+            }
+            serde_json::Value::Array(arr) => arr.iter().map(count_cache_control).sum(),
+            _ => 0,
+        }
+    }
+
+    #[test]
+    fn inject_prompt_cache_control_stays_within_four_breakpoint_limit() {
+        // Regression test: Anthropic caps cache_control at 4 per request.
+        // With many tools and many messages we must still emit ≤4.
+        use serde_json::json;
+
+        let tools: Vec<_> = (0..50)
+            .map(|i| {
+                json!({
+                    "name": format!("tool_{i}"),
+                    "description": "test",
+                    "input_schema": {"type": "object"}
+                })
+            })
+            .collect();
+
+        let messages: Vec<_> = (0..20)
+            .map(|i| {
+                json!({
+                    "role": if i % 2 == 0 { "user" } else { "assistant" },
+                    "content": format!("message {i}")
+                })
+            })
+            .collect();
+
+        let mut body = json!({
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 1024,
+            "system": "You are helpful.",
+            "messages": messages,
+            "tools": tools,
+        });
+
+        super::inject_prompt_cache_control(&mut body);
+
+        let total = count_cache_control(&body);
+        assert!(
+            total <= 4,
+            "expected ≤4 cache_control breakpoints, found {total}"
+        );
+        // Should still place breakpoints (system + last tool + last cacheable msg = 3).
+        assert!(
+            total >= 3,
+            "expected at least 3 breakpoints when system/tools/messages all present, found {total}"
+        );
+    }
+
+    #[test]
+    fn inject_prompt_cache_control_marks_only_last_tool() {
+        use serde_json::json;
+
+        let mut body = json!({
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 1024,
+            "tools": [
+                {"name": "a", "description": "a", "input_schema": {"type": "object"}},
+                {"name": "b", "description": "b", "input_schema": {"type": "object"}},
+                {"name": "c", "description": "c", "input_schema": {"type": "object"}},
+            ],
+        });
+
+        super::inject_prompt_cache_control(&mut body);
+
+        let tools = body.get("tools").unwrap().as_array().unwrap();
+        assert!(tools[0].get("cache_control").is_none());
+        assert!(tools[1].get("cache_control").is_none());
+        assert_eq!(tools[2]["cache_control"]["type"], "ephemeral");
+    }
+
+    #[test]
+    fn inject_prompt_cache_control_splits_system_at_boundary_marker() {
+        use serde_json::json;
+
+        let system = format!(
+            "static intro\n{}\ndynamic env",
+            super::SYSTEM_PROMPT_DYNAMIC_BOUNDARY
+        );
+        let mut body = json!({
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 1024,
+            "system": system,
+        });
+
+        super::inject_prompt_cache_control(&mut body);
+
+        let arr = body["system"].as_array().expect("system should be array");
+        assert_eq!(arr.len(), 2, "system should split into 2 blocks at marker");
+        assert_eq!(arr[0]["type"], "text");
+        assert_eq!(arr[0]["text"], "static intro");
+        assert_eq!(arr[0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(arr[1]["type"], "text");
+        assert_eq!(arr[1]["text"], "dynamic env");
+        assert_eq!(arr[1]["cache_control"]["type"], "ephemeral");
+        // Marker text itself is consumed by the split.
+        assert!(!arr[0]["text"]
+            .as_str()
+            .unwrap()
+            .contains(super::SYSTEM_PROMPT_DYNAMIC_BOUNDARY));
+        assert!(!arr[1]["text"]
+            .as_str()
+            .unwrap()
+            .contains(super::SYSTEM_PROMPT_DYNAMIC_BOUNDARY));
+    }
+
+    #[test]
+    fn inject_prompt_cache_control_no_split_when_marker_absent() {
+        use serde_json::json;
+
+        let mut body = json!({
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 1024,
+            "system": "no marker here",
+        });
+
+        super::inject_prompt_cache_control(&mut body);
+
+        let arr = body["system"].as_array().expect("system should be array");
+        assert_eq!(arr.len(), 1, "single block when no marker");
+        assert_eq!(arr[0]["text"], "no marker here");
+        assert_eq!(arr[0]["cache_control"]["type"], "ephemeral");
+    }
+
+    #[test]
+    fn inject_prompt_cache_control_total_breakpoints_with_split_stays_within_four() {
+        // System (split into 2) + 1 last-tool + 1 last-cacheable-message = 4. At cap.
+        use serde_json::json;
+
+        let system = format!("static\n{}\ndynamic", super::SYSTEM_PROMPT_DYNAMIC_BOUNDARY);
+        let tools: Vec<_> = (0..50)
+            .map(|i| {
+                json!({
+                    "name": format!("tool_{i}"),
+                    "description": "x",
+                    "input_schema": {"type": "object"}
+                })
+            })
+            .collect();
+        let messages: Vec<_> = (0..20)
+            .map(|i| {
+                json!({
+                    "role": if i % 2 == 0 { "user" } else { "assistant" },
+                    "content": format!("m{i}")
+                })
+            })
+            .collect();
+
+        let mut body = json!({
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 1024,
+            "system": system,
+            "tools": tools,
+            "messages": messages,
+        });
+
+        super::inject_prompt_cache_control(&mut body);
+
+        assert_eq!(
+            count_cache_control(&body),
+            4,
+            "split system (2) + last tool (1) + last cacheable msg (1) = 4"
+        );
+    }
+
+    #[test]
+    fn inject_prompt_cache_control_default_options_emits_no_ttl() {
+        // Bare default (Default::default) keeps both TTLs None — preserves
+        // historical JSON shape for any caller that uses the zero-arg helper.
+        use serde_json::json;
+
+        let mut body = json!({
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 1024,
+            "system": "You are helpful.",
+            "tools": [{"name": "x", "description": "x", "input_schema": {"type": "object"}}],
+            "messages": [
+                {"role": "user", "content": "a"},
+                {"role": "assistant", "content": "b"},
+                {"role": "user", "content": "c"},
+            ],
+        });
+
+        super::inject_prompt_cache_control(&mut body);
+
+        let system = body["system"].as_array().unwrap();
+        assert!(system[0]["cache_control"].get("ttl").is_none());
+        let tools = body["tools"].as_array().unwrap();
+        assert!(tools[0]["cache_control"].get("ttl").is_none());
+        let msg0 = body["messages"][0]["content"].as_array().unwrap();
+        assert!(msg0[0]["cache_control"].get("ttl").is_none());
+    }
+
+    #[test]
+    fn inject_prompt_cache_control_emits_global_ttl_only_on_global_breakpoints() {
+        use serde_json::json;
+
+        let options = super::CacheControlOptions {
+            enable_scope: false,
+            global_ttl: Some("1h".to_string()),
+            turn_ttl: None,
+        };
+
+        let mut body = json!({
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 1024,
+            "system": "You are helpful.",
+            "tools": [{"name": "x", "description": "x", "input_schema": {"type": "object"}}],
+            "messages": [
+                {"role": "user", "content": "a"},
+                {"role": "assistant", "content": "b"},
+                {"role": "user", "content": "c"},
+            ],
+        });
+
+        super::inject_prompt_cache_control_with_options(&mut body, &options);
+
+        // System (global): ttl present
+        let system = body["system"].as_array().unwrap();
+        assert_eq!(system[0]["cache_control"]["ttl"], "1h");
+        // Tools (global): ttl present
+        let tools = body["tools"].as_array().unwrap();
+        assert_eq!(tools[0]["cache_control"]["ttl"], "1h");
+        // Messages (turn): ttl absent
+        let msg0 = body["messages"][0]["content"].as_array().unwrap();
+        assert!(msg0[0]["cache_control"].get("ttl").is_none());
+    }
+
+    #[test]
+    fn inject_prompt_cache_control_emits_turn_ttl_only_on_message_breakpoints() {
+        use serde_json::json;
+
+        let options = super::CacheControlOptions {
+            enable_scope: false,
+            global_ttl: None,
+            turn_ttl: Some("5m".to_string()),
+        };
+
+        let mut body = json!({
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 1024,
+            "system": "You are helpful.",
+            "tools": [{"name": "x", "description": "x", "input_schema": {"type": "object"}}],
+            "messages": [
+                {"role": "user", "content": "a"},
+                {"role": "assistant", "content": "b"},
+                {"role": "user", "content": "c"},
+            ],
+        });
+
+        super::inject_prompt_cache_control_with_options(&mut body, &options);
+
+        let system = body["system"].as_array().unwrap();
+        assert!(system[0]["cache_control"].get("ttl").is_none());
+        let tools = body["tools"].as_array().unwrap();
+        assert!(tools[0]["cache_control"].get("ttl").is_none());
+        let msg0 = body["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(msg0[0]["cache_control"]["ttl"], "5m");
+    }
+
+    #[test]
+    fn client_cache_control_options_defaults_global_ttl_to_one_hour() {
+        // Build with explicit overrides so the test is hermetic regardless
+        // of the test runner's environment.
+        let client = super::AnthropicClient::new("dummy")
+            .with_cache_ttl(None)
+            .with_extended_cache_ttl_disabled(false);
+        let opts = client.cache_control_options();
+        assert_eq!(opts.global_ttl.as_deref(), Some("1h"));
+        assert_eq!(opts.turn_ttl, None);
+    }
+
+    #[test]
+    fn client_with_cache_ttl_overrides_global_ttl() {
+        let client = super::AnthropicClient::new("dummy")
+            .with_cache_ttl(Some("15m".to_string()))
+            .with_extended_cache_ttl_disabled(false);
+        let opts = client.cache_control_options();
+        assert_eq!(opts.global_ttl.as_deref(), Some("15m"));
+    }
+
+    #[test]
+    fn client_disable_extended_cache_ttl_clears_global_ttl() {
+        let client = super::AnthropicClient::new("dummy")
+            .with_cache_ttl(None)
+            .with_extended_cache_ttl_disabled(true);
+        let opts = client.cache_control_options();
+        assert_eq!(opts.global_ttl, None);
     }
 
     #[tokio::test]
