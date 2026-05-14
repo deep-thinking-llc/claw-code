@@ -2,7 +2,7 @@
 # Ninmu Code installer
 #
 # Detects the host OS, verifies the Rust toolchain (rustc + cargo),
-# builds the `ninmu` binary from the `rust/` workspace, and runs a
+# builds the `ninmu` binary from the `src/` workspace, and runs a
 # post-install verification step. Supports Linux, macOS, and WSL.
 #
 # Usage:
@@ -160,12 +160,12 @@ ${COLOR_DIM}---------------${COLOR_RESET}
 
   ${COLOR_BOLD}5. Build fails partway through${COLOR_RESET}
      Try a clean build:
-       cd rust && cargo clean && cargo build --workspace
+       cd src && cargo clean && cargo build --workspace
      If the failure mentions ring/openssl, double check step 2.
 
   ${COLOR_BOLD}6. 'ninmu' not found after install${COLOR_RESET}
      The binary lives at:
-       rust/target/${BUILD_PROFILE}/ninmu
+       src/target/${BUILD_PROFILE}/ninmu
      Add it to your PATH or invoke it with the full path.
 
 EOF
@@ -237,10 +237,10 @@ esac
 step "Locating the Rust workspace"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-RUST_DIR="${SCRIPT_DIR}/rust"
+RUST_DIR="${SCRIPT_DIR}/src"
 
 if [ ! -d "${RUST_DIR}" ]; then
-    error "Could not find rust/ workspace next to install.sh"
+    error "Could not find src/ workspace next to install.sh"
     error "Expected: ${RUST_DIR}"
     exit 1
 fi
@@ -387,7 +387,7 @@ Authentication:
   ${COLOR_DIM}# or use OAuth:${COLOR_RESET}
   ${NINMU_BIN} login
 
-For deeper docs, see USAGE.md and rust/README.md.
+For deeper docs, see src/USAGE.md and src/README.md.
 EOF
 
 # clear the failure trap on clean exit

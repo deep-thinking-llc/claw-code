@@ -91,7 +91,7 @@ Process cancellation may produce no result if the process is terminated external
 
 ## Manual Smoke
 
-From `rust/`:
+From `src/`:
 
 ```bash
 cargo build --workspace
