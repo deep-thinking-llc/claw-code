@@ -5117,6 +5117,20 @@ mod tests {
         assert!(report.contains("Cache create     3"));
         assert!(report.contains("Cache read       1"));
         assert!(report.contains("Total tokens     32"));
+        // Cache hit rate = 1 / (20 + 3 + 1) = 4.2%
+        assert!(
+            report.contains("Cache hit rate   4.2%"),
+            "expected cache hit rate line, got: {report}"
+        );
+    }
+
+    #[test]
+    fn cost_report_omits_cache_hit_rate_when_no_input_activity() {
+        let report = format_cost_report(ninmu_runtime::TokenUsage::default());
+        assert!(
+            !report.contains("Cache hit rate"),
+            "cache hit rate should be hidden for empty usage to avoid misleading 0%, got: {report}"
+        );
     }
 
     #[test]

@@ -146,6 +146,29 @@ impl TokenUsage {
             + self.cache_read_input_tokens
     }
 
+    /// Fraction of *input-side* tokens that came from the prompt cache.
+    ///
+    /// `cache_read / (cache_read + cache_creation + input)`. Output tokens
+    /// are excluded — they aren't subject to caching. Returns `None` when
+    /// no input-side activity occurred (avoids dividing 0/0 and signalling
+    /// a misleading "0% hit rate" for an empty turn).
+    ///
+    /// A healthy multi-turn coding session should see this above ~0.7 once
+    /// past the first turn; consistently low values signal that something
+    /// is breaking the cached prefix between turns.
+    #[must_use]
+    pub fn cache_hit_ratio(self) -> Option<f64> {
+        // Sum in f64 directly — every input is u32 so the sum stays within
+        // f64's exact-integer range, no precision loss vs going through u64.
+        let read = f64::from(self.cache_read_input_tokens);
+        let denom =
+            read + f64::from(self.cache_creation_input_tokens) + f64::from(self.input_tokens);
+        if denom == 0.0 {
+            return None;
+        }
+        Some(read / denom)
+    }
+
     #[must_use]
     pub fn estimate_cost_usd(self) -> UsageCostEstimate {
         self.estimate_cost_usd_with_pricing(ModelPricing::default_sonnet_tier())
@@ -360,6 +383,59 @@ fn per_provider_label(model: &str) -> String {
 mod tests {
     use super::{format_usd, pricing_for_model, TokenUsage, UsageTracker};
     use crate::session::{ContentBlock, ConversationMessage, MessageRole, Session};
+
+    #[test]
+    fn cache_hit_ratio_returns_none_on_empty_usage() {
+        let usage = TokenUsage::default();
+        assert_eq!(usage.cache_hit_ratio(), None);
+    }
+
+    #[test]
+    fn cache_hit_ratio_returns_one_when_all_reads() {
+        let usage = TokenUsage {
+            input_tokens: 0,
+            output_tokens: 100,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 10_000,
+        };
+        assert_eq!(usage.cache_hit_ratio(), Some(1.0));
+    }
+
+    #[test]
+    fn cache_hit_ratio_returns_zero_on_cold_cache() {
+        let usage = TokenUsage {
+            input_tokens: 5_000,
+            output_tokens: 200,
+            cache_creation_input_tokens: 3_000,
+            cache_read_input_tokens: 0,
+        };
+        assert_eq!(usage.cache_hit_ratio(), Some(0.0));
+    }
+
+    #[test]
+    fn cache_hit_ratio_excludes_output_tokens() {
+        // Output tokens are not subject to caching; including them in the
+        // denominator would understate the hit rate for verbose responses.
+        let usage = TokenUsage {
+            input_tokens: 0,
+            output_tokens: 999_999,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 1,
+        };
+        assert_eq!(usage.cache_hit_ratio(), Some(1.0));
+    }
+
+    #[test]
+    fn cache_hit_ratio_computes_typical_warm_session_value() {
+        let usage = TokenUsage {
+            input_tokens: 200,
+            output_tokens: 500,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 8_000,
+        };
+        let ratio = usage.cache_hit_ratio().expect("ratio");
+        assert!((ratio - 8_000.0 / 8_200.0).abs() < 1e-9);
+    }
 
     #[test]
     fn tracks_true_cumulative_usage() {

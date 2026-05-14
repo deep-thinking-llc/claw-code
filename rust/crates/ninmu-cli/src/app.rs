@@ -160,6 +160,51 @@ fn get_pooled_client(
     }))
 }
 
+/// Build a low-cost cache-priming request that mirrors the system prompt and
+/// tool list of the upcoming first turn.
+///
+/// The warmup request is not user-facing — it just primes Anthropic's prompt
+/// cache so the user's first real turn hits the cache. We send a tiny `1`
+/// max_tokens with a throwaway user message; system + tools dominate the
+/// cost, which is what we want cached. Pure helper for testability.
+pub(crate) fn build_warmup_request(
+    model: &str,
+    system_prompt: &[String],
+    tools: Option<Vec<ToolDefinition>>,
+) -> MessageRequest {
+    MessageRequest {
+        model: model.to_string(),
+        max_tokens: 1,
+        messages: vec![InputMessage::user_text("warmup")],
+        system: (!system_prompt.is_empty()).then(|| system_prompt.join("\n\n")),
+        tools,
+        tool_choice: None,
+        stream: false,
+        temperature: Some(0.0),
+        ..Default::default()
+    }
+}
+
+/// Spawn a fire-and-forget cache-warmup request on the shared tokio runtime.
+/// Returns immediately; the warmup runs in the background and any failure is
+/// silently ignored (cache miss on first turn is the only consequence).
+///
+/// Set `NINMU_DISABLE_CACHE_WARMUP=1` to opt out — useful when iterating on
+/// prompt construction or when the user's account lacks Anthropic prompt
+/// caching beta access.
+fn spawn_cache_warmup(client: Arc<AnthropicClient>, request: MessageRequest) {
+    if std::env::var("NINMU_DISABLE_CACHE_WARMUP").is_ok() {
+        return;
+    }
+    let handle = TOKIO_RUNTIME
+        .get_or_init(|| tokio::runtime::Runtime::new().expect("tokio runtime"))
+        .handle()
+        .clone();
+    handle.spawn(async move {
+        let _ = client.warm_cache(&request).await;
+    });
+}
+
 impl LiveCli {
     pub(crate) fn new(
         model: String,
@@ -185,8 +230,19 @@ impl LiveCli {
             permission_mode,
             None,
             runtime_plugin_state.clone(),
-            shared_client,
+            shared_client.clone(),
         )?;
+
+        // Fire-and-forget cache warmup with the same system+tools the first
+        // turn will use. Doesn't block startup.
+        if let Some(client) = shared_client.as_ref() {
+            let warmup_tools = enable_tools.then(|| {
+                filter_tool_specs(&runtime_plugin_state.tool_registry, allowed_tools.as_ref())
+            });
+            let warmup = build_warmup_request(&model, &system_prompt, warmup_tools);
+            spawn_cache_warmup(Arc::clone(client), warmup);
+        }
+
         let cli = Self {
             model,
             allowed_tools,
@@ -3965,13 +4021,49 @@ pub(crate) fn collect_prompt_cache_events(
 
 #[cfg(test)]
 mod tests {
-    use super::{format_cache_break_warning, AnthropicRuntimeClient};
+    use super::{build_warmup_request, format_cache_break_warning, AnthropicRuntimeClient};
+    use ninmu_api::ToolDefinition;
     use ninmu_runtime::PromptCacheEvent;
 
     #[test]
     fn anthropic_runtime_client_is_send() {
         fn assert_send<T: Send>() {}
         assert_send::<AnthropicRuntimeClient>();
+    }
+
+    #[test]
+    fn build_warmup_request_uses_minimal_max_tokens_and_carries_system_and_tools() {
+        let system = vec!["You are helpful".to_string(), "Section 2".to_string()];
+        let tools = vec![ToolDefinition {
+            name: "read_file".to_string(),
+            description: Some("Read a file".to_string()),
+            input_schema: serde_json::json!({"type": "object"}),
+        }];
+        let req = build_warmup_request("claude-sonnet-4-6", &system, Some(tools.clone()));
+
+        assert_eq!(req.model, "claude-sonnet-4-6");
+        assert_eq!(req.max_tokens, 1, "warmup should request minimal output");
+        assert_eq!(
+            req.system.as_deref(),
+            Some("You are helpful\n\nSection 2"),
+            "system sections should be joined"
+        );
+        assert_eq!(
+            req.tools,
+            Some(tools),
+            "tools should be passed through so they get into the cached prefix"
+        );
+        assert_eq!(req.messages.len(), 1, "warmup needs one user message");
+        assert!(!req.stream, "warmup must not stream");
+        assert_eq!(req.temperature, Some(0.0));
+    }
+
+    #[test]
+    fn build_warmup_request_with_no_system_emits_none() {
+        let req = build_warmup_request("claude-sonnet-4-6", &[], None);
+        assert_eq!(req.system, None);
+        assert_eq!(req.tools, None);
+        assert_eq!(req.max_tokens, 1);
     }
 
     #[test]
