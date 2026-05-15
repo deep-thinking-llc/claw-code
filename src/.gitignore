@@ -1,0 +1,12 @@
+target/
+.omx/
+.nimmud-agents/
+.claude/
+.claw/
+.clawd-agents/
+.clawd-todos.json
+.sandbox-home/
+# Ninmu Code local artifacts
+.ninmu/settings.local.json
+.ninmu/sessions/
+.ninmuhip/

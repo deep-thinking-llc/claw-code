@@ -3,15 +3,15 @@
 **Agent-first autonomous coding harness.** A Rust SDK and CLI for building, orchestrating, and reviewing AI-driven coding workflows — designed primarily for machine consumers, with a human escape hatch. Ninmu Code provides the `ninmu` CLI and Ninmu SDK.
 
 <p align="center">
-  <a href="./docs/ROADMAP.md">Roadmap</a>
+  <a href="./docs/private/ROADMAP.md">Roadmap</a>
   ·
-  <a href="./docs/AGENT-INTEGRATION.md">Agent Integration</a>
+  <a href="./docs/private/design/AGENT-INTEGRATION.md">Agent Integration</a>
   ·
-  <a href="./docs/HUMAN-DX.md">Human Experience</a>
+  <a href="./docs/private/design/HUMAN-DX.md">Human Experience</a>
   ·
   <a href="./docs/TUI-USER-GUIDE.md">TUI Guide</a>
   ·
-  <a href="./docs/PI-MONO-PARITY-DESIGN.md">Architecture</a>
+  <a href="./docs/private/design/PI-MONO-PARITY-DESIGN.md">Architecture</a>
 </p>
 
 ---
@@ -57,7 +57,7 @@ Ninmu Code is an **autonomous coding harness** — a system where AI agents exec
 
 ```bash
 git clone https://github.com/deep-thinking-llc/ninmu-code
-cd ninmu-code/rust
+cd ninmu-code/src
 cargo build --workspace
 ```
 
@@ -111,8 +111,8 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ninmu-sdk = { path = "../rust/crates/ninmu-sdk" }
-ninmu-runtime = { path = "../rust/crates/ninmu-runtime" }
+ninmu-sdk = { path = "../src/crates/ninmu-sdk" }
+ninmu-runtime = { path = "../src/crates/ninmu-runtime" }
 ```
 
 ```rust
@@ -236,26 +236,24 @@ Add any OpenAI-compatible or Anthropic-compatible provider via `models.json` —
 
 ```
 ninmu-code/
-├── rust/                        # Rust workspace
+├── src/                         # Rust workspace
 │   ├── Cargo.toml               # Workspace root
 │   └── crates/
-│       ├── api/                 # Provider clients (Anthropic, OpenAI, custom)
-│       ├── commands/            # Shared slash-command registry + help
-│       ├── compat-harness/      # TS manifest extraction harness
-│       ├── mock-anthropic-service/ # Deterministic mock for CLI tests
-│       ├── plugins/             # Plugin system
-│       ├── runtime/             # Session engine, permissions, MCP, auth
-│       ├── sdk/                 # Agent SDK (AgentSession, Orchestrator,
+│       ├── ninmu-api/           # Provider clients (Anthropic, OpenAI, custom)
+│       ├── ninmu-commands/      # Shared slash-command registry + help
+│       ├── ninmu-compat-harness/ # TS manifest extraction harness
+│       ├── ninmu-mock-anthropic-service/ # Deterministic mock for CLI tests
+│       ├── ninmu-plugins/       # Plugin system
+│       ├── ninmu-runtime/       # Session engine, permissions, MCP, auth
+│       ├── ninmu-sdk/           # Agent SDK (AgentSession, Orchestrator,
 │       │                       #   ReviewManager, NotificationDispatcher,
 │       │                       #   SecretScrubber, AuditLog, SetupReport)
 │       ├── ninmu-cli/           # CLI binary (`ninmu`)
-│       ├── telemetry/           # Session tracing + usage telemetry
-│       └── tools/               # Built-in tool implementations
+│       ├── ninmu-telemetry/     # Session tracing + usage telemetry
+│       └── ninmu-tools/         # Built-in tool implementations
 ├── docs/                        # Documentation
-│   ├── ROADMAP.md               # Project roadmap
-│   ├── AGENT-INTEGRATION.md     # Agent integration guide
-│   ├── HUMAN-DX.md              # Human experience design
-│   └── PI-MONO-PARITY-DESIGN.md # Architecture comparison
+│   ├── private/                 # Private docs submodule
+│   └── TUI-USER-GUIDE.md        # TUI guide
 └── CLAUDE.md                    # AI coding assistant guidance
 ```
 
@@ -263,15 +261,15 @@ ninmu-code/
 
 | Document | Purpose |
 |----------|---------|
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Project direction and planned work |
-| [docs/AGENT-INTEGRATION.md](docs/AGENT-INTEGRATION.md) | How to integrate agents via SDK, CLI, and RPC |
-| [docs/HUMAN-DX.md](docs/HUMAN-DX.md) | Human review workflows, notifications, deployment previews |
-| [docs/PI-MONO-PARITY-DESIGN.md](docs/PI-MONO-PARITY-DESIGN.md) | Architecture comparison with pi-mono reference |
+| [docs/private/ROADMAP.md](docs/private/ROADMAP.md) | Project direction and planned work |
+| [docs/private/design/AGENT-INTEGRATION.md](docs/private/design/AGENT-INTEGRATION.md) | How to integrate agents via SDK, CLI, and RPC |
+| [docs/private/design/HUMAN-DX.md](docs/private/design/HUMAN-DX.md) | Human review workflows, notifications, deployment previews |
+| [docs/private/design/PI-MONO-PARITY-DESIGN.md](docs/private/design/PI-MONO-PARITY-DESIGN.md) | Architecture comparison with pi-mono reference |
 
 ## Development
 
 ```bash
-cd rust
+cd src
 
 # Build
 cargo build --workspace

@@ -1,7 +1,0 @@
-target/
-.omx/
-.nimmud-agents/
-# Ninmu Code local artifacts
-.ninmu/settings.local.json
-.ninmu/sessions/
-.ninmuhip/

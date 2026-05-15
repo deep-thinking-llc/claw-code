@@ -17,7 +17,7 @@ ninmu --tui
 From source:
 
 ```bash
-cd rust
+cd src
 cargo run -p ninmu-cli -- --tui
 ```
 
@@ -444,7 +444,7 @@ Use `Up` and `Down` from the input dock to revisit previous prompts. This is use
 Be explicit when you care about scope:
 
 ```text
-Only inspect rust/crates/ninmu-cli/src/tui and propose changes before editing.
+Only inspect src/crates/ninmu-cli/src/tui and propose changes before editing.
 ```
 
 ```text
@@ -527,7 +527,7 @@ Now implement the smallest fix and add tests that would have caught the bug.
 Good follow-up after denying:
 
 ```text
-That command was too broad. Please run a narrower command limited to rust/crates/ninmu-cli.
+That command was too broad. Please run a narrower command limited to src/crates/ninmu-cli.
 ```
 
 ### Tutorial 5: Export A Session

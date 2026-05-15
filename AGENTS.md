@@ -38,9 +38,9 @@ Provider labels in code, config, and docs use these canonical names (case-insens
 
 ## Verification
 
-- Run Rust verification from `rust/`: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`
-- API tests: `cargo test -p api`
-- Runtime tests: `cargo test -p runtime`
+- Run Rust verification from `src/`: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`
+- API tests: `cargo test -p ninmu-api`
+- Runtime tests: `cargo test -p ninmu-runtime`
 
 ## Provider architecture
 
