@@ -4,7 +4,7 @@ use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use ninmu_mock_anthropic_service::{MockAnthropicService, SCENARIO_PREFIX};
+use ninmu_mock_anthropic_service::{ThreadedMockAnthropicService, SCENARIO_PREFIX};
 use serde_json::Value;
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -13,10 +13,7 @@ static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 fn compact_flag_prints_only_final_assistant_text_without_tool_call_details() {
     // given a workspace pointed at the mock Anthropic service and a fixture file
     // that the read_file_roundtrip scenario will fetch through a tool call
-    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime should build");
-    let server = runtime
-        .block_on(MockAnthropicService::spawn())
-        .expect("mock service should start");
+    let server = ThreadedMockAnthropicService::spawn().expect("mock service should start");
     let base_url = server.base_url();
 
     let workspace = unique_temp_dir("compact-read-file");
@@ -80,10 +77,7 @@ fn compact_flag_prints_only_final_assistant_text_without_tool_call_details() {
 fn compact_flag_streaming_text_only_emits_final_message_text() {
     // given a workspace pointed at the mock Anthropic service running the
     // streaming_text scenario which only emits a single assistant text block
-    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime should build");
-    let server = runtime
-        .block_on(MockAnthropicService::spawn())
-        .expect("mock service should start");
+    let server = ThreadedMockAnthropicService::spawn().expect("mock service should start");
     let base_url = server.base_url();
 
     let workspace = unique_temp_dir("compact-streaming-text");
@@ -128,10 +122,7 @@ fn compact_flag_streaming_text_only_emits_final_message_text() {
 
 #[test]
 fn compact_flag_with_json_output_emits_structured_json() {
-    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime should build");
-    let server = runtime
-        .block_on(MockAnthropicService::spawn())
-        .expect("mock service should start");
+    let server = ThreadedMockAnthropicService::spawn().expect("mock service should start");
     let base_url = server.base_url();
 
     let workspace = unique_temp_dir("compact-json");

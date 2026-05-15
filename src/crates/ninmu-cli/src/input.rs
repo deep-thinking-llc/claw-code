@@ -28,6 +28,9 @@ pub struct CompletionProvider {
     pub model_names: Vec<String>,
     /// Function that returns available session IDs for completion.
     pub session_ids: Vec<String>,
+    /// Optional deterministic file candidates for tests or embedded callers.
+    /// When empty, file completion scans the current working directory.
+    pub file_paths: Vec<String>,
 }
 
 struct SlashCommandHelper {
@@ -69,13 +72,27 @@ impl SlashCommandHelper {
 
     /// Complete file paths for commands that accept file arguments.
     fn complete_file_arg(&self, prefix: &str) -> Vec<Pair> {
-        let file_matches = crate::file_ref::complete_file_ref(prefix);
+        let file_matches = self.complete_file_ref(prefix);
         file_matches
             .into_iter()
             .map(|path| Pair {
                 display: path.clone(),
                 replacement: path,
             })
+            .collect()
+    }
+
+    fn complete_file_ref(&self, prefix: &str) -> Vec<String> {
+        if self.provider.file_paths.is_empty() {
+            return crate::file_ref::complete_file_ref(prefix);
+        }
+
+        let lower_prefix = prefix.to_lowercase();
+        self.provider
+            .file_paths
+            .iter()
+            .filter(|path| path.to_lowercase().starts_with(&lower_prefix))
+            .cloned()
             .collect()
     }
 
@@ -178,7 +195,7 @@ impl Completer for SlashCommandHelper {
     ) -> rustyline::Result<(usize, Vec<Self::Candidate>)> {
         // Try @-file completion first
         if let Some(file_prefix) = at_file_prefix(line, pos) {
-            let file_matches = crate::file_ref::complete_file_ref(&file_prefix);
+            let file_matches = self.complete_file_ref(&file_prefix);
             if !file_matches.is_empty() {
                 // start = byte offset right after the @ character.
                 // rustyline replaces line[start..pos] with Pair.replacement.
@@ -230,7 +247,7 @@ impl Hinter for SlashCommandHelper {
     fn hint(&self, line: &str, pos: usize, _ctx: &Context<'_>) -> Option<String> {
         // Show inline hint when typing after @
         if let Some(file_prefix) = at_file_prefix(line, pos) {
-            let matches = crate::file_ref::complete_file_ref(&file_prefix);
+            let matches = self.complete_file_ref(&file_prefix);
             if let Some(first) = matches.first() {
                 // Show remaining characters of first match as dim hint
                 let suffix = &first[file_prefix.len()..];
@@ -617,18 +634,25 @@ mod tests {
 
     // --- @-file completion integration tests ---
 
+    fn deterministic_file_provider() -> CompletionProvider {
+        CompletionProvider {
+            file_paths: vec![
+                "Cargo.toml".to_string(),
+                "src/main.rs".to_string(),
+                "src/input.rs".to_string(),
+            ],
+            ..CompletionProvider::default()
+        }
+    }
+
     #[test]
     fn completes_at_file_ref_in_helper() {
-        let _guard = cwd_lock();
-        let workspace = file_completion_workspace("helper");
-        let helper = SlashCommandHelper::new(Vec::new(), CompletionProvider::default());
+        let helper = SlashCommandHelper::new(Vec::new(), deterministic_file_provider());
         let history = DefaultHistory::new();
         let ctx = Context::new(&history);
-        let (start, matches) = with_current_dir(&workspace, || {
-            helper
-                .complete("@src", 4, &ctx)
-                .expect("completion should work")
-        });
+        let (start, matches) = helper
+            .complete("@src", 4, &ctx)
+            .expect("completion should work");
 
         // start should be 1 (right after @), replacements should be just the path
         assert_eq!(start, 1);
@@ -641,16 +665,12 @@ mod tests {
 
     #[test]
     fn completes_at_file_ref_with_prefix() {
-        let _guard = cwd_lock();
-        let workspace = file_completion_workspace("prefix");
-        let helper = SlashCommandHelper::new(Vec::new(), CompletionProvider::default());
+        let helper = SlashCommandHelper::new(Vec::new(), deterministic_file_provider());
         let history = DefaultHistory::new();
         let ctx = Context::new(&history);
-        let (start, matches) = with_current_dir(&workspace, || {
-            helper
-                .complete("read @Cargo", 11, &ctx)
-                .expect("completion should work")
-        });
+        let (start, matches) = helper
+            .complete("read @Cargo", 11, &ctx)
+            .expect("completion should work");
 
         // "read @Cargo" -> prefix="Cargo", start=6 (after @), pos=11
         assert_eq!(start, 6);
@@ -662,7 +682,7 @@ mod tests {
 
     #[test]
     fn no_at_file_completions_for_unknown_prefix() {
-        let helper = SlashCommandHelper::new(Vec::new(), CompletionProvider::default());
+        let helper = SlashCommandHelper::new(Vec::new(), deterministic_file_provider());
         let history = DefaultHistory::new();
         let ctx = Context::new(&history);
         let (_, matches) = helper
@@ -674,12 +694,10 @@ mod tests {
 
     #[test]
     fn at_file_hint_shows_first_match_suffix() {
-        let _guard = cwd_lock();
-        let workspace = file_completion_workspace("hint");
-        let helper = SlashCommandHelper::new(Vec::new(), CompletionProvider::default());
+        let helper = SlashCommandHelper::new(Vec::new(), deterministic_file_provider());
         let history = DefaultHistory::new();
         let ctx = Context::new(&history);
-        let hint = with_current_dir(&workspace, || helper.hint("@src", 4, &ctx));
+        let hint = helper.hint("@src", 4, &ctx);
 
         // Should hint with remaining path after "src"
         assert!(hint.is_some(), "hint should appear for @src prefix");
@@ -691,7 +709,7 @@ mod tests {
 
     #[test]
     fn at_file_hint_none_for_unknown_prefix() {
-        let helper = SlashCommandHelper::new(Vec::new(), CompletionProvider::default());
+        let helper = SlashCommandHelper::new(Vec::new(), deterministic_file_provider());
         let history = DefaultHistory::new();
         let ctx = Context::new(&history);
         let hint = helper.hint("@zzz_nonexistent_xyz", 21, &ctx);
@@ -700,7 +718,7 @@ mod tests {
 
     #[test]
     fn at_file_hint_none_when_cursor_not_at_end() {
-        let helper = SlashCommandHelper::new(Vec::new(), CompletionProvider::default());
+        let helper = SlashCommandHelper::new(Vec::new(), deterministic_file_provider());
         let history = DefaultHistory::new();
         let ctx = Context::new(&history);
         let hint = helper.hint("@src/main.rs", 5, &ctx);

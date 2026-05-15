@@ -7,7 +7,7 @@ use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use ninmu_mock_anthropic_service::{MockAnthropicService, SCENARIO_PREFIX};
+use ninmu_mock_anthropic_service::{ThreadedMockAnthropicService, SCENARIO_PREFIX};
 use serde_json::{json, Value};
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -21,10 +21,7 @@ fn clean_env_cli_reaches_mock_anthropic_service_across_scripted_parity_scenarios
         .cloned()
         .map(|entry| (entry.name.clone(), entry))
         .collect::<BTreeMap<_, _>>();
-    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime should build");
-    let server = runtime
-        .block_on(MockAnthropicService::spawn())
-        .expect("mock service should start");
+    let server = ThreadedMockAnthropicService::spawn().expect("mock service should start");
     let base_url = server.base_url();
 
     let cases = [
@@ -182,7 +179,7 @@ fn clean_env_cli_reaches_mock_anthropic_service_across_scripted_parity_scenarios
         fs::remove_dir_all(&workspace.root).expect("workspace cleanup should succeed");
     }
 
-    let captured = runtime.block_on(server.captured_requests());
+    let captured = server.captured_requests();
     // After `be561bf` added count_tokens preflight, each turn sends an
     // extra POST to `/v1/messages/count_tokens` before the messages POST.
     // The original count (21) assumed messages-only requests.  We now

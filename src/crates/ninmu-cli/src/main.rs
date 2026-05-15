@@ -3474,6 +3474,16 @@ mod tests {
 
     #[test]
     fn removed_login_and_logout_subcommands_error_helpfully() {
+        let _env_guard = env_lock();
+        let _cwd_guard = cwd_guard();
+        let previous_cwd = std::env::current_dir().ok();
+        let original_config_home = std::env::var("NINMU_CONFIG_HOME").ok();
+        let original_permission_mode = std::env::var("RUSTY_CLAUDE_PERMISSION_MODE").ok();
+        std::env::set_current_dir(env!("CARGO_MANIFEST_DIR"))
+            .expect("stable cwd should be available");
+        std::env::remove_var("NINMU_CONFIG_HOME");
+        std::env::remove_var("RUSTY_CLAUDE_PERMISSION_MODE");
+
         let login = parse_args(&["login".to_string()]).expect_err("login should be removed");
         assert!(login.contains("ANTHROPIC_API_KEY"));
         let logout = parse_args(&["logout".to_string()]).expect_err("logout should be removed");
@@ -3721,6 +3731,12 @@ mod tests {
                 );
             }
             other => panic!("expected CliAction::Status, got: {other:?}"),
+        }
+
+        restore_optional_env("NINMU_CONFIG_HOME", original_config_home);
+        restore_optional_env("RUSTY_CLAUDE_PERMISSION_MODE", original_permission_mode);
+        if let Some(previous_cwd) = previous_cwd {
+            restore_cwd(previous_cwd);
         }
     }
 
@@ -5626,9 +5642,7 @@ UU conflicted.rs",
                 .expect("legacy path should exist")
         );
 
-        if std::env::set_current_dir(&previous).is_err() {
-            std::env::set_current_dir(env!("CARGO_MANIFEST_DIR")).expect("restore cwd");
-        }
+        restore_cwd(previous);
         std::fs::remove_dir_all(workspace).expect("workspace should clean up");
     }
 
@@ -5661,9 +5675,7 @@ UU conflicted.rs",
             newer.path.canonicalize().expect("newer path should exist")
         );
 
-        if std::env::set_current_dir(&previous).is_err() {
-            std::env::set_current_dir(env!("CARGO_MANIFEST_DIR")).expect("restore cwd");
-        }
+        restore_cwd(previous);
         std::fs::remove_dir_all(workspace).expect("workspace should clean up");
     }
 
@@ -5709,9 +5721,7 @@ UU conflicted.rs",
             "expected originating workspace in error: {error}"
         );
 
-        if std::env::set_current_dir(&previous).is_err() {
-            std::env::set_current_dir(env!("CARGO_MANIFEST_DIR")).expect("restore cwd");
-        }
+        restore_cwd(previous);
         std::fs::remove_dir_all(workspace_a).expect("workspace a should clean up");
         std::fs::remove_dir_all(workspace_b).expect("workspace b should clean up");
     }
@@ -5742,6 +5752,20 @@ UU conflicted.rs",
 
     fn cwd_guard() -> std::sync::MutexGuard<'static, ()> {
         crate::test_cwd_lock()
+    }
+
+    fn restore_cwd(previous: PathBuf) {
+        if std::env::set_current_dir(&previous).is_err() {
+            std::env::set_current_dir(env!("CARGO_MANIFEST_DIR"))
+                .expect("manifest cwd should be available");
+        }
+    }
+
+    fn restore_optional_env(key: &str, value: Option<String>) {
+        match value {
+            Some(value) => std::env::set_var(key, value),
+            None => std::env::remove_var(key),
+        }
     }
 
     #[test]

@@ -3125,6 +3125,7 @@ pub(crate) fn run_repl(
                 Ok(sessions) => sessions.into_iter().map(|s| s.id).collect(),
                 Err(_) => Vec::new(),
             },
+            file_paths: Vec::new(),
         },
     );
     println!("{}", cli.startup_banner());
@@ -3381,6 +3382,7 @@ fn run_repl_standard(cli: &mut LiveCli) -> Result<(), Box<dyn std::error::Error>
                 Ok(sessions) => sessions.into_iter().map(|s| s.id).collect(),
                 Err(_) => Vec::new(),
             },
+            file_paths: Vec::new(),
         },
     );
     println!("{}", cli.startup_banner());

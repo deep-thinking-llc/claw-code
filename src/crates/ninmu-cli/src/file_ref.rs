@@ -78,6 +78,11 @@ pub fn parse_file_refs(input: &str) -> Vec<FileRef> {
 ///
 /// Returns the expanded input and lists of resolved/failed paths.
 pub fn expand_file_refs(input: &str) -> ExpandedInput {
+    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    expand_file_refs_from(input, &cwd)
+}
+
+fn expand_file_refs_from(input: &str, cwd: &Path) -> ExpandedInput {
     let refs = parse_file_refs(input);
 
     if refs.is_empty() {
@@ -88,7 +93,6 @@ pub fn expand_file_refs(input: &str) -> ExpandedInput {
         };
     }
 
-    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let mut resolved = Vec::new();
     let mut failed = Vec::new();
     let mut result = input.to_string();
@@ -135,11 +139,15 @@ pub fn expand_file_refs(input: &str) -> ExpandedInput {
 ///   or by path prefix if `/` is present
 pub fn complete_file_ref(partial: &str) -> Vec<String> {
     let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    complete_file_ref_from(partial, &cwd)
+}
+
+fn complete_file_ref_from(partial: &str, cwd: &Path) -> Vec<String> {
     let limit = 50;
 
     if partial.is_empty() {
         // List top-level files/dirs
-        return list_dir_entries(&cwd, "", limit);
+        return list_dir_entries(cwd, "", limit);
     }
 
     // Check if partial contains a directory separator
@@ -155,7 +163,7 @@ pub fn complete_file_ref(partial: &str) -> Vec<String> {
         }
     } else {
         // No directory separator — match files in CWD by filename prefix
-        list_dir_entries_matching(&cwd, "", partial, limit)
+        list_dir_entries_matching(cwd, "", partial, limit)
     }
 }
 
@@ -242,22 +250,7 @@ mod tests {
     use super::*;
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    /// Mutex to serialize CWD-dependent tests (parallel tests share process CWD).
-    static CWD_LOCK: Mutex<()> = Mutex::new(());
-
-    /// Helper to run a test closure with exclusive CWD access.
-    fn with_cwd_lock<F>(f: F)
-    where
-        F: FnOnce(),
-    {
-        let _guard = CWD_LOCK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        f();
-    }
 
     fn temp_dir(label: &str) -> std::path::PathBuf {
         static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -335,28 +328,20 @@ mod tests {
 
     #[test]
     fn expand_existing_file() {
-        with_cwd_lock(|| {
-            let dir = temp_dir("expand");
-            let _ = fs::create_dir_all(&dir);
-            fs::write(dir.join("hello.txt"), "hello world").expect("write test file");
+        let dir = temp_dir("expand");
+        let _ = fs::create_dir_all(&dir);
+        fs::write(dir.join("hello.txt"), "hello world").expect("write test file");
 
-            let orig_cwd = env::current_dir();
-            env::set_current_dir(&dir).expect("cd to temp dir");
+        let input = "please read @hello.txt and summarize";
+        let result = expand_file_refs_from(input, &dir);
 
-            let input = "please read @hello.txt and summarize";
-            let result = expand_file_refs(input);
+        assert!(result.expanded.contains("<file path=\"hello.txt\">"));
+        assert!(result.expanded.contains("hello world"));
+        assert!(result.expanded.contains("</file>"));
+        assert_eq!(result.resolved, vec!["hello.txt"]);
+        assert!(result.failed.is_empty());
 
-            assert!(result.expanded.contains("<file path=\"hello.txt\">"));
-            assert!(result.expanded.contains("hello world"));
-            assert!(result.expanded.contains("</file>"));
-            assert_eq!(result.resolved, vec!["hello.txt"]);
-            assert!(result.failed.is_empty());
-
-            if let Ok(cwd) = orig_cwd {
-                let _ = env::set_current_dir(cwd);
-            }
-            let _ = fs::remove_dir_all(&dir);
-        });
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -370,139 +355,91 @@ mod tests {
 
     #[test]
     fn expand_multiple_refs() {
-        with_cwd_lock(|| {
-            let dir = temp_dir("multi");
-            let _ = fs::create_dir_all(&dir);
-            fs::write(dir.join("a.txt"), "content A").expect("write a");
-            fs::write(dir.join("b.txt"), "content B").expect("write b");
+        let dir = temp_dir("multi");
+        let _ = fs::create_dir_all(&dir);
+        fs::write(dir.join("a.txt"), "content A").expect("write a");
+        fs::write(dir.join("b.txt"), "content B").expect("write b");
 
-            let orig_cwd = env::current_dir();
-            env::set_current_dir(&dir).expect("cd to temp dir");
+        let input = "compare @a.txt and @b.txt";
+        let result = expand_file_refs_from(input, &dir);
 
-            let input = "compare @a.txt and @b.txt";
-            let result = expand_file_refs(input);
+        assert_eq!(result.resolved.len(), 2);
+        assert!(result.expanded.contains("content A"));
+        assert!(result.expanded.contains("content B"));
 
-            assert_eq!(result.resolved.len(), 2);
-            assert!(result.expanded.contains("content A"));
-            assert!(result.expanded.contains("content B"));
-
-            if let Ok(cwd) = orig_cwd {
-                let _ = env::set_current_dir(cwd);
-            }
-            let _ = fs::remove_dir_all(&dir);
-        });
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn complete_empty_partial() {
-        with_cwd_lock(|| {
-            let dir = temp_dir("complete");
-            let _ = fs::create_dir_all(&dir);
-            fs::write(dir.join("alpha.rs"), "").expect("write");
-            fs::write(dir.join("beta.txt"), "").expect("write");
-            let _ = fs::create_dir_all(dir.join("src"));
+        let dir = temp_dir("complete");
+        let _ = fs::create_dir_all(&dir);
+        fs::write(dir.join("alpha.rs"), "").expect("write");
+        fs::write(dir.join("beta.txt"), "").expect("write");
+        let _ = fs::create_dir_all(dir.join("src"));
 
-            let orig_cwd = env::current_dir();
-            env::set_current_dir(&dir).expect("cd to temp dir");
+        let results = complete_file_ref_from("", &dir);
+        assert!(results.contains(&"alpha.rs".to_string()));
+        assert!(results.contains(&"beta.txt".to_string()));
+        assert!(results.contains(&"src/".to_string()));
+        // Should not contain hidden files
+        assert!(!results.iter().any(|r| r.starts_with('.')));
 
-            let results = complete_file_ref("");
-            assert!(results.contains(&"alpha.rs".to_string()));
-            assert!(results.contains(&"beta.txt".to_string()));
-            assert!(results.contains(&"src/".to_string()));
-            // Should not contain hidden files
-            assert!(!results.iter().any(|r| r.starts_with('.')));
-
-            if let Ok(cwd) = orig_cwd {
-                let _ = env::set_current_dir(cwd);
-            }
-            let _ = fs::remove_dir_all(&dir);
-        });
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn complete_partial_filename() {
-        with_cwd_lock(|| {
-            let dir = temp_dir("partial");
-            let _ = fs::create_dir_all(&dir);
-            fs::write(dir.join("main.rs"), "").expect("write");
-            fs::write(dir.join("model.rs"), "").expect("write");
-            fs::write(dir.join("config.toml"), "").expect("write");
+        let dir = temp_dir("partial");
+        let _ = fs::create_dir_all(&dir);
+        fs::write(dir.join("main.rs"), "").expect("write");
+        fs::write(dir.join("model.rs"), "").expect("write");
+        fs::write(dir.join("config.toml"), "").expect("write");
 
-            let orig_cwd = env::current_dir();
-            env::set_current_dir(&dir).expect("cd to temp dir");
+        let results = complete_file_ref_from("ma", &dir);
+        assert!(results.contains(&"main.rs".to_string()));
+        assert!(!results.contains(&"config.toml".to_string()));
 
-            let results = complete_file_ref("ma");
-            assert!(results.contains(&"main.rs".to_string()));
-            assert!(!results.contains(&"config.toml".to_string()));
-
-            if let Ok(cwd) = orig_cwd {
-                let _ = env::set_current_dir(cwd);
-            }
-            let _ = fs::remove_dir_all(&dir);
-        });
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn complete_with_directory_prefix() {
-        with_cwd_lock(|| {
-            let dir = temp_dir("dir");
-            let _ = fs::create_dir_all(dir.join("src"));
-            fs::write(dir.join("src/main.rs"), "").expect("write");
-            fs::write(dir.join("src/model.rs"), "").expect("write");
+        let dir = temp_dir("dir");
+        let _ = fs::create_dir_all(dir.join("src"));
+        fs::write(dir.join("src/main.rs"), "").expect("write");
+        fs::write(dir.join("src/model.rs"), "").expect("write");
 
-            let orig_cwd = env::current_dir();
-            env::set_current_dir(&dir).expect("cd to temp dir");
+        let results = complete_file_ref_from("src/ma", &dir);
+        assert!(results.contains(&"src/main.rs".to_string()));
+        assert!(!results.contains(&"src/model.rs".to_string()));
 
-            let results = complete_file_ref("src/ma");
-            assert!(results.contains(&"src/main.rs".to_string()));
-            assert!(!results.contains(&"src/model.rs".to_string()));
-
-            if let Ok(cwd) = orig_cwd {
-                let _ = env::set_current_dir(cwd);
-            }
-            let _ = fs::remove_dir_all(&dir);
-        });
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn complete_case_insensitive() {
-        with_cwd_lock(|| {
-            let dir = temp_dir("case");
-            let _ = fs::create_dir_all(&dir);
-            fs::write(dir.join("README.md"), "").expect("write");
+        let dir = temp_dir("case");
+        let _ = fs::create_dir_all(&dir);
+        fs::write(dir.join("README.md"), "").expect("write");
 
-            let orig_cwd = env::current_dir();
-            env::set_current_dir(&dir).expect("cd to temp dir");
+        let results = complete_file_ref_from("read", &dir);
+        assert!(results.contains(&"README.md".to_string()));
 
-            let results = complete_file_ref("read");
-            assert!(results.contains(&"README.md".to_string()));
-
-            if let Ok(cwd) = orig_cwd {
-                let _ = env::set_current_dir(cwd);
-            }
-            let _ = fs::remove_dir_all(&dir);
-        });
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn complete_respects_limit() {
-        with_cwd_lock(|| {
-            let dir = temp_dir("limit");
-            let _ = fs::create_dir_all(&dir);
-            for i in 0..60 {
-                fs::write(dir.join(format!("file_{i:03}.txt")), "").expect("write");
-            }
+        let dir = temp_dir("limit");
+        let _ = fs::create_dir_all(&dir);
+        for i in 0..60 {
+            fs::write(dir.join(format!("file_{i:03}.txt")), "").expect("write");
+        }
 
-            let orig_cwd = env::current_dir();
-            env::set_current_dir(&dir).expect("cd to temp dir");
+        let results = complete_file_ref_from("", &dir);
+        assert!(results.len() <= 50);
 
-            let results = complete_file_ref("");
-            assert!(results.len() <= 50);
-
-            if let Ok(cwd) = orig_cwd {
-                let _ = env::set_current_dir(cwd);
-            }
-            let _ = fs::remove_dir_all(&dir);
-        });
+        let _ = fs::remove_dir_all(&dir);
     }
 }
