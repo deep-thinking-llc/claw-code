@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 use std::io;
+use std::sync::mpsc as std_mpsc;
 use std::sync::Arc;
+use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use ninmu_api::{InputContentBlock, MessageRequest, MessageResponse, OutputContentBlock, Usage};
+use ninmu_api::{MessageResponse, OutputContentBlock, Usage};
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{mpsc as tokio_mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 
 pub const SCENARIO_PREFIX: &str = "PARITY_SCENARIO:";
@@ -28,6 +30,108 @@ pub struct MockAnthropicService {
     requests: Arc<Mutex<Vec<CapturedRequest>>>,
     shutdown: Option<oneshot::Sender<()>>,
     join_handle: JoinHandle<()>,
+}
+
+#[derive(Debug, Clone)]
+struct MockRequest {
+    stream: bool,
+    messages: Vec<MockMessage>,
+}
+
+#[derive(Debug, Clone)]
+struct MockMessage {
+    content: Vec<MockContentBlock>,
+}
+
+#[derive(Debug, Clone)]
+enum MockContentBlock {
+    Text(String),
+    ToolUse {
+        id: String,
+        name: String,
+    },
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+        is_error: bool,
+    },
+}
+
+pub struct ThreadedMockAnthropicService {
+    base_url: String,
+    commands: tokio_mpsc::UnboundedSender<ThreadedServiceCommand>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+enum ThreadedServiceCommand {
+    CapturedRequests(std_mpsc::Sender<Vec<CapturedRequest>>),
+    Shutdown,
+}
+
+impl ThreadedMockAnthropicService {
+    pub fn spawn() -> io::Result<Self> {
+        let (ready_tx, ready_rx) = std_mpsc::channel();
+        let (commands, mut command_rx) = tokio_mpsc::unbounded_channel();
+        let thread = thread::spawn(move || {
+            let runtime = tokio::runtime::Runtime::new().expect("tokio runtime should build");
+            runtime.block_on(async move {
+                let server = match MockAnthropicService::spawn().await {
+                    Ok(server) => server,
+                    Err(error) => {
+                        let _ = ready_tx.send(Err(error));
+                        return;
+                    }
+                };
+                let _ = ready_tx.send(Ok(server.base_url()));
+
+                while let Some(command) = command_rx.recv().await {
+                    match command {
+                        ThreadedServiceCommand::CapturedRequests(reply) => {
+                            let _ = reply.send(server.captured_requests().await);
+                        }
+                        ThreadedServiceCommand::Shutdown => break,
+                    }
+                }
+            });
+        });
+
+        let base_url = ready_rx
+            .recv()
+            .map_err(|error| io::Error::new(io::ErrorKind::BrokenPipe, error.to_string()))??;
+
+        Ok(Self {
+            base_url,
+            commands,
+            thread: Some(thread),
+        })
+    }
+
+    #[must_use]
+    pub fn base_url(&self) -> String {
+        self.base_url.clone()
+    }
+
+    #[must_use]
+    pub fn captured_requests(&self) -> Vec<CapturedRequest> {
+        let (reply_tx, reply_rx) = std_mpsc::channel();
+        if self
+            .commands
+            .send(ThreadedServiceCommand::CapturedRequests(reply_tx))
+            .is_err()
+        {
+            return Vec::new();
+        }
+        reply_rx.recv().unwrap_or_default()
+    }
+}
+
+impl Drop for ThreadedMockAnthropicService {
+    fn drop(&mut self) {
+        let _ = self.commands.send(ThreadedServiceCommand::Shutdown);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
 }
 
 impl MockAnthropicService {
@@ -52,7 +156,9 @@ impl MockAnthropicService {
                         };
                         let request_state = Arc::clone(&request_state);
                         tokio::spawn(async move {
-                            let _ = handle_connection(socket, request_state).await;
+                            if let Err(error) = handle_connection(socket, request_state).await {
+                                eprintln!("mock anthropic connection error: {error}");
+                            }
                         });
                     }
                 }
@@ -144,21 +250,31 @@ async fn handle_connection(
     requests: Arc<Mutex<Vec<CapturedRequest>>>,
 ) -> io::Result<()> {
     let (method, path, headers, raw_body) = read_http_request(&mut socket).await?;
-    let request: MessageRequest = serde_json::from_str(&raw_body)
+    let request_value: Value = serde_json::from_str(&raw_body)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
+    let request = parse_mock_request(&request_value);
     let scenario = detect_scenario(&request)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing parity scenario"))?;
 
     requests.lock().await.push(CapturedRequest {
         method,
-        path,
+        path: path.clone(),
         headers,
         scenario: scenario.name().to_string(),
         stream: request.stream,
         raw_body,
     });
 
-    let response = build_http_response(&request, scenario);
+    let response = if path == "/v1/messages/count_tokens" {
+        http_response(
+            "200 OK",
+            "application/json",
+            r#"{"input_tokens":42}"#,
+            &[("request-id", request_id_for(scenario))],
+        )
+    } else {
+        build_http_response(&request, scenario)
+    };
     socket.write_all(response.as_bytes()).await?;
     Ok(())
 }
@@ -241,10 +357,87 @@ fn find_header_end(bytes: &[u8]) -> Option<usize> {
     bytes.windows(4).position(|window| window == b"\r\n\r\n")
 }
 
-fn detect_scenario(request: &MessageRequest) -> Option<Scenario> {
+fn parse_mock_request(value: &Value) -> MockRequest {
+    let stream = value
+        .get("stream")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let messages = value
+        .get("messages")
+        .and_then(Value::as_array)
+        .map(|messages| {
+            messages
+                .iter()
+                .map(|message| MockMessage {
+                    content: parse_mock_content(message.get("content")),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    MockRequest { stream, messages }
+}
+
+fn parse_mock_content(value: Option<&Value>) -> Vec<MockContentBlock> {
+    match value {
+        Some(Value::String(text)) => vec![MockContentBlock::Text(text.clone())],
+        Some(Value::Array(blocks)) => blocks.iter().filter_map(parse_mock_content_block).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn parse_mock_content_block(value: &Value) -> Option<MockContentBlock> {
+    let block = value.as_object()?;
+    match block.get("type").and_then(Value::as_str)? {
+        "text" => block
+            .get("text")
+            .and_then(Value::as_str)
+            .map(|text| MockContentBlock::Text(text.to_string())),
+        "tool_use" => Some(MockContentBlock::ToolUse {
+            id: block.get("id")?.as_str()?.to_string(),
+            name: block.get("name")?.as_str()?.to_string(),
+        }),
+        "tool_result" => Some(MockContentBlock::ToolResult {
+            tool_use_id: block.get("tool_use_id")?.as_str()?.to_string(),
+            content: flatten_wire_tool_result_content(block.get("content")),
+            is_error: block
+                .get("is_error")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
+        _ => None,
+    }
+}
+
+fn flatten_wire_tool_result_content(value: Option<&Value>) -> String {
+    match value {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Array(blocks)) => blocks
+            .iter()
+            .filter_map(|block| {
+                if let Some(text) = block
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+                {
+                    return Some(text);
+                }
+                block
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Some(other) => other.to_string(),
+        None => String::new(),
+    }
+}
+
+fn detect_scenario(request: &MockRequest) -> Option<Scenario> {
     request.messages.iter().rev().find_map(|message| {
         message.content.iter().rev().find_map(|block| match block {
-            InputContentBlock::Text { text } => text
+            MockContentBlock::Text(text) => text
                 .split_whitespace()
                 .find_map(|token| token.strip_prefix(SCENARIO_PREFIX))
                 .and_then(Scenario::parse),
@@ -253,22 +446,22 @@ fn detect_scenario(request: &MessageRequest) -> Option<Scenario> {
     })
 }
 
-fn latest_tool_result(request: &MessageRequest) -> Option<(String, bool)> {
+fn latest_tool_result(request: &MockRequest) -> Option<(String, bool)> {
     request.messages.iter().rev().find_map(|message| {
         message.content.iter().rev().find_map(|block| match block {
-            InputContentBlock::ToolResult {
+            MockContentBlock::ToolResult {
                 content, is_error, ..
-            } => Some((flatten_tool_result_content(content), *is_error)),
+            } => Some((content.clone(), *is_error)),
             _ => None,
         })
     })
 }
 
-fn tool_results_by_name(request: &MessageRequest) -> HashMap<String, (String, bool)> {
+fn tool_results_by_name(request: &MockRequest) -> HashMap<String, (String, bool)> {
     let mut tool_names_by_id = HashMap::new();
     for message in &request.messages {
         for block in &message.content {
-            if let InputContentBlock::ToolUse { id, name, .. } = block {
+            if let MockContentBlock::ToolUse { id, name } = block {
                 tool_names_by_id.insert(id.clone(), name.clone());
             }
         }
@@ -277,7 +470,7 @@ fn tool_results_by_name(request: &MessageRequest) -> HashMap<String, (String, bo
     let mut results = HashMap::new();
     for message in request.messages.iter().rev() {
         for block in message.content.iter().rev() {
-            if let InputContentBlock::ToolResult {
+            if let MockContentBlock::ToolResult {
                 tool_use_id,
                 content,
                 is_error,
@@ -289,26 +482,15 @@ fn tool_results_by_name(request: &MessageRequest) -> HashMap<String, (String, bo
                     .unwrap_or_else(|| tool_use_id.clone());
                 results
                     .entry(tool_name)
-                    .or_insert_with(|| (flatten_tool_result_content(content), *is_error));
+                    .or_insert_with(|| (content.clone(), *is_error));
             }
         }
     }
     results
 }
 
-fn flatten_tool_result_content(content: &[ninmu_api::ToolResultContentBlock]) -> String {
-    content
-        .iter()
-        .map(|block| match block {
-            ninmu_api::ToolResultContentBlock::Text { text } => text.clone(),
-            ninmu_api::ToolResultContentBlock::Json { value } => value.to_string(),
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 #[allow(clippy::too_many_lines)]
-fn build_http_response(request: &MessageRequest, scenario: Scenario) -> String {
+fn build_http_response(request: &MockRequest, scenario: Scenario) -> String {
     let response = if request.stream {
         let body = build_stream_body(request, scenario);
         return http_response(
@@ -330,7 +512,7 @@ fn build_http_response(request: &MessageRequest, scenario: Scenario) -> String {
 }
 
 #[allow(clippy::too_many_lines)]
-fn build_stream_body(request: &MessageRequest, scenario: Scenario) -> String {
+fn build_stream_body(request: &MockRequest, scenario: Scenario) -> String {
     match scenario {
         Scenario::StreamingText => streaming_text_sse(),
         Scenario::ReadFileRoundtrip => match latest_tool_result(request) {
@@ -468,7 +650,7 @@ fn build_stream_body(request: &MessageRequest, scenario: Scenario) -> String {
 }
 
 #[allow(clippy::too_many_lines)]
-fn build_message_response(request: &MessageRequest, scenario: Scenario) -> MessageResponse {
+fn build_message_response(request: &MockRequest, scenario: Scenario) -> MessageResponse {
     match scenario {
         Scenario::StreamingText => text_message_response(
             "msg_streaming_text",
