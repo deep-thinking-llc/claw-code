@@ -15,6 +15,7 @@ DESIGN.md
 # WIP design and implementation docs (drop the _ prefix to commit)
 _*.md
 _docs/
+.superpowers/
 # Implementation pass documents (auto-generated)
 docs/implementation_pass.md
 

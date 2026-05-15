@@ -46,23 +46,25 @@ This plan covers a comprehensive analysis of the current terminal user interface
 5. **Permission prompting**: Interactive Y/N approval for restricted tool calls
 6. **Thorough tests**: Every formatting function, every parse path has unit tests
 
-### Weaknesses & Gaps
+### Landed TUI Capabilities
 
-1. **`main.rs` is a 3,159-line monolith** — all REPL logic, formatting, API bridging, session management, and tests in one file
-2. **No alternate-screen / full-screen layout** — everything is inline scrolling output
-3. **No progress bars** — only a single braille spinner; no indication of streaming progress or token counts during generation
-4. **No visual diff rendering** — `/diff` just dumps raw git diff text
-5. **No syntax highlighting in streamed output** — markdown rendering only applies to tool results, not to the main assistant response stream
-6. **No status bar / HUD** — model, tokens, session info not visible during interaction
-7. **No image/attachment preview** — `SendUserMessage` resolves attachments but never displays them
-8. **Streaming is char-by-char with artificial delay** — `stream_markdown` sleeps 8ms per whitespace-delimited chunk
-9. **No color theme customization** — hardcoded `ColorTheme::default()`
-10. **No resize handling** — no terminal size awareness for wrapping, truncation, or layout
-11. **Historical dual app split** — the repo previously carried a separate `CliApp` prototype alongside `LiveCli`; the prototype is gone, but the monolithic `main.rs` still needs extraction
-12. **No pager for long outputs** — `/status`, `/config`, `/memory` can overflow the viewport
-13. **Tool results not collapsible** — large bash outputs flood the screen
-14. **No thinking/reasoning indicator** — when the model is in "thinking" mode, no visual distinction
-15. **No auto-complete for tool arguments** — only slash command names complete
+> Updated 2026-05-15: the original plan predated the active `ratatui` TUI. Several items below have since landed under `crates/ninmu-cli/src/tui/`; this document now tracks the remaining gaps rather than treating the whole TUI as future work.
+
+1. **Full-screen TUI shell** — `tui/ratatui_app.rs` provides the active alternate-screen cockpit with header rail, conversation view, OPS panel, and input dock.
+2. **Status and metadata display** — `tui/status_bar.rs`, `tui/progress.rs`, and the OPS panel expose model, permission, token/context, cost, branch, and progress metadata where available.
+3. **Reasoning controls and thinking state** — `Ctrl+R`, `/effort`, `/think`, and `tui/thinking.rs` expose reasoning effort and thinking mode.
+4. **Tool output readability** — `tui/scrollback.rs`, `tui/tool_panel.rs`, and `tui/timeline.rs` support collapsed long tool output, tool summaries, and visual tool state.
+5. **Diff rendering and long-output paging** — `tui/diff_view.rs` renders colored diff summaries, and `tui/pager.rs` backs long command output.
+6. **Command discovery** — `Ctrl+K` opens a command palette, `Ctrl+O` opens the model selector, and Tab now provides curated slash-command and common-argument completion.
+
+### Remaining Gaps
+
+1. **Structural extraction remains incomplete** — the inline CLI still carries substantial `LiveCli` responsibilities in `app.rs`; future work should keep module boundaries deliberate.
+2. **Live streamed markdown is still limited** — richer incremental markdown rendering for assistant response streams remains a follow-up.
+3. **Attachment previews are still absent** — resolved image/attachment inputs are not displayed inline in the TUI.
+4. **Theme customization is limited** — the semantic TUI palette exists, but named user-selectable themes and color-depth fallback are not complete.
+5. **Advanced navigation remains future work** — conversation search, undo, mouse support, and richer interactive session picking are still independent backlog items.
+6. **Slash completion is curated** — common command arguments, model/session values, and aliases complete, but exhaustive filepath/provider/tool-state completion is not implemented.
 
 ---
 
@@ -77,7 +79,7 @@ This plan covers a comprehensive analysis of the current terminal user interface
 | 0.1 | **Extract `LiveCli` into `app.rs`** — Move the entire `LiveCli` struct, its impl, and helpers (`format_*`, `render_*`, session management) out of `main.rs` into focused modules: `app.rs` (core), `format.rs` (report formatting), `session_manager.rs` (session CRUD) | M |
 | 0.2 | **Keep the legacy `CliApp` removed** — The old `CliApp` prototype has already been deleted; if any unique ideas remain valuable (for example stream event handler patterns), reintroduce them intentionally inside the active `LiveCli` extraction rather than restoring the old file wholesale | S |
 | 0.3 | **Extract `main.rs` arg parsing** — The current `parse_args()` is still a hand-rolled parser in `main.rs`. If parsing is extracted later, do it into a newly-introduced module intentionally rather than reviving the removed prototype `args.rs` by accident | S |
-| 0.4 | **Create a `tui/` module** — Introduce `crates/ninmu-cli/src/tui/mod.rs` as the namespace for all new TUI components: `status_bar.rs`, `layout.rs`, `tool_panel.rs`, etc. | S |
+| 0.4 | **Create a `tui/` module** — Done. The active TUI namespace includes `ratatui_app.rs`, `status_bar.rs`, `tool_panel.rs`, `diff_view.rs`, `pager.rs`, `theme.rs`, `progress.rs`, `thinking.rs`, and related helpers. | Done |
 
 ### Phase 1: Status Bar & Live HUD
 
@@ -85,10 +87,10 @@ This plan covers a comprehensive analysis of the current terminal user interface
 
 | Task | Description | Effort |
 |---|---|---|
-| 1.1 | **Terminal-size-aware status line** — Use `crossterm::terminal::size()` to render a bottom-pinned status bar showing: model name, permission mode, session ID, cumulative token count, estimated cost | M |
-| 1.2 | **Live token counter** — Update the status bar in real-time as `AssistantEvent::Usage` and `AssistantEvent::TextDelta` events arrive during streaming | M |
-| 1.3 | **Turn duration timer** — Show elapsed time for the current turn (the `showTurnDuration` config already exists in Config tool but isn't wired up) | S |
-| 1.4 | **Git branch indicator** — Display the current git branch in the status bar (already parsed via `parse_git_status_metadata`) | S |
+| 1.1 | **Terminal-size-aware status line** — Done in the ratatui layout/header and metadata rail. | Done |
+| 1.2 | **Live token counter** — Partially done through token/context metadata updates; continue refining provider-specific live usage fidelity as runtime events evolve. | Partial |
+| 1.3 | **Turn duration timer** — Done for active turn/progress display where elapsed runtime is available. | Done |
+| 1.4 | **Git branch indicator** — Done in the header rail when git metadata is available. | Done |
 
 ### Phase 2: Enhanced Streaming Output
 
@@ -96,9 +98,9 @@ This plan covers a comprehensive analysis of the current terminal user interface
 
 | Task | Description | Effort |
 |---|---|---|
-| 2.1 | **Live markdown rendering** — Instead of raw text streaming, buffer text deltas and incrementally render Markdown as it arrives (heading detection, bold/italic, inline code). The existing `TerminalRenderer::render_markdown` can be adapted for incremental use | L |
-| 2.2 | **Thinking indicator** — When extended thinking/reasoning is active, show a distinct animated indicator (e.g., `🧠 Reasoning...` with pulsing dots or a different spinner) instead of the generic `🦀 Thinking...` | S |
-| 2.3 | **Streaming progress bar** — Add an optional horizontal progress indicator below the spinner showing approximate completion (based on max_tokens vs. output_tokens so far) | M |
+| 2.1 | **Live markdown rendering** — Still open for richer incremental markdown during assistant response streaming. | L |
+| 2.2 | **Thinking indicator** — Done through TUI thinking state and reasoning controls. | Done |
+| 2.3 | **Streaming progress bar** — Done for available progress and usage metadata; keep improving accuracy as providers expose richer usage events. | Done |
 | 2.4 | **Remove artificial stream delay** — The current `stream_markdown` sleeps 8ms per chunk. For tool results this is fine, but for the main response stream it should be immediate or configurable | S |
 
 ### Phase 3: Tool Call Visualization
@@ -107,11 +109,11 @@ This plan covers a comprehensive analysis of the current terminal user interface
 
 | Task | Description | Effort |
 |---|---|---|
-| 3.1 | **Collapsible tool output** — For tool results longer than N lines (configurable, default 15), show a summary with `[+] Expand` hint; pressing a key reveals the full output. Initially implement as truncation with a "full output saved to file" fallback | M |
-| 3.2 | **Syntax-highlighted tool results** — When tool results contain code (detected by tool name — `bash` stdout, `read_file` content, `REPL` output), apply syntect highlighting rather than rendering as plain text | M |
-| 3.3 | **Tool call timeline** — For multi-tool turns, show a compact summary: `🔧 bash → ✓ | read_file → ✓ | edit_file → ✓ (3 tools, 1.2s)` after all tool calls complete | S |
-| 3.4 | **Diff-aware edit_file display** — When `edit_file` succeeds, show a colored unified diff of the change instead of just `✓ edit_file: path` | M |
-| 3.5 | **Permission prompt enhancement** — Style the approval prompt with box drawing, color the tool name, show a one-line summary of what the tool will do | S |
+| 3.1 | **Collapsible tool output** — Done through scrollback collapsible entries and Tab toggling. | Done |
+| 3.2 | **Syntax-highlighted tool results** — Partial. Markdown/code rendering exists, but not every tool output path is semantically highlighted. | Partial |
+| 3.3 | **Tool call timeline** — Done through TUI tool/timeline state. | Done |
+| 3.4 | **Diff-aware edit_file display** — Partial. Colored diff rendering exists; keep expanding edit-specific integration as tool result payloads allow. | Partial |
+| 3.5 | **Permission prompt enhancement** — Done for TUI permission overlay styling. | Done |
 
 ### Phase 4: Enhanced Slash Commands & Navigation
 
@@ -119,12 +121,12 @@ This plan covers a comprehensive analysis of the current terminal user interface
 
 | Task | Description | Effort |
 |---|---|---|
-| 4.1 | **Colored `/diff` output** — Parse the git diff and render it with red/green coloring for removals/additions, similar to `delta` or `diff-so-fancy` | M |
-| 4.2 | **Pager for long outputs** — When `/status`, `/config`, `/memory`, or `/diff` produce output longer than the terminal height, pipe through an internal pager (scroll with j/k/q) or external `$PAGER` | M |
+| 4.1 | **Colored `/diff` output** — Done through `tui/diff_view.rs` and CLI diff report integration. | Done |
+| 4.2 | **Pager for long outputs** — Done through `tui/pager.rs` and `print_with_pager`. | Done |
 | 4.3 | **`/search` command** — Add a new command to search conversation history by keyword | M |
 | 4.4 | **`/undo` command** — Undo the last file edit by restoring from the `originalFile` data in `write_file`/`edit_file` tool results | M |
-| 4.5 | **Interactive session picker** — Replace the text-based `/session list` with an interactive fuzzy-filterable list (up/down arrows to select, enter to switch) | L |
-| 4.6 | **Tab completion for tool arguments** — Extend `SlashCommandHelper` to complete file paths after `/export`, model names after `/model`, session IDs after `/session switch` | M |
+| 4.5 | **Interactive session picker** — Still open; current session workflows use command palette entries plus slash commands. | L |
+| 4.6 | **Tab completion for tool arguments** — Partial. Curated command arguments, model aliases/current model, active session, and recent sessions complete; exhaustive filepath and provider-state completion remain future work. | Partial |
 
 ### Phase 5: Color Themes & Configuration
 
@@ -143,10 +145,10 @@ This plan covers a comprehensive analysis of the current terminal user interface
 
 | Task | Description | Effort |
 |---|---|---|
-| 6.1 | **Add `ratatui` dependency** — Introduce `ratatui` (terminal UI framework) as an optional dependency for the full-screen mode | S |
-| 6.2 | **Split-pane layout** — Top pane: conversation with scrollback; Bottom pane: input area; Right sidebar (optional): tool status/todo list | XL |
-| 6.3 | **Scrollable conversation view** — Navigate past messages with PgUp/PgDn, search within conversation | L |
-| 6.4 | **Keyboard shortcuts panel** — Show `?` help overlay with all keybindings | M |
+| 6.1 | **Add `ratatui` dependency** — Done. | Done |
+| 6.2 | **Split-pane layout** — Done for the active header/conversation/input/OPS layout. | Done |
+| 6.3 | **Scrollable conversation view** — Partial. Scrolling exists; search remains open. | Partial |
+| 6.4 | **Keyboard shortcuts panel** — Done through `?` / `F1` help overlay. | Done |
 | 6.5 | **Mouse support** — Click to expand tool results, scroll conversation, select text for copy | L |
 
 ---
@@ -155,23 +157,23 @@ This plan covers a comprehensive analysis of the current terminal user interface
 
 ### Immediate (High Impact, Moderate Effort)
 
-1. **Phase 0** — Essential cleanup. The 3,159-line `main.rs` is the #1 maintenance risk and blocks clean TUI additions.
-2. **Phase 1.1–1.2** — Status bar with live tokens. Highest-impact UX win: users constantly want to know token usage.
-3. **Phase 2.4** — Remove artificial delay. Low effort, immediately noticeable improvement.
-4. **Phase 3.1** — Collapsible tool output. Large bash outputs currently wreck readability.
+1. **Phase 0.1 / 0.3** — Continue structural cleanup only when it directly reduces active maintenance risk.
+2. **Phase 2.1** — Improve live streamed markdown rendering for assistant responses.
+3. **Phase 3.2 / 3.4** — Finish semantic highlighting and edit-specific diff integration across all tool result paths.
+4. **Phase 4.6** — Extend completion beyond curated arguments when the data source is cheap and deterministic.
 
 ### Near-Term (Next Sprint)
 
-5. **Phase 2.1** — Live markdown rendering. Makes the core interaction feel polished.
-6. **Phase 3.2** — Syntax-highlighted tool results.
-7. **Phase 3.4** — Diff-aware edit display.
-8. **Phase 4.1** — Colored diff for `/diff`.
+5. **Phase 4.3** — Conversation search.
+6. **Phase 4.4** — Undo for the last file edit.
+7. **Phase 4.5** — Interactive session picker.
+8. **Phase 5.1–5.2** — Named themes and terminal color-depth fallback.
 
 ### Longer-Term
 
-9. **Phase 5** — Color themes (user demand-driven).
-10. **Phase 4.2–4.6** — Enhanced navigation and commands.
-11. **Phase 6** — Full-screen mode (major undertaking, evaluate after earlier phases ship).
+9. **Phase 5.3–5.4** — Spinner and banner customization.
+10. **Phase 6.5** — Mouse support.
+11. **Attachment previews** — Add image/attachment display once runtime payloads expose enough metadata.
 
 ---
 

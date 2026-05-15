@@ -444,8 +444,15 @@ pub(crate) fn slash_command_completion_candidates_with_sessions(
         "/config hooks",
         "/config model",
         "/config plugins",
+        "/effort low",
+        "/effort medium",
+        "/effort high",
+        "/effort max",
+        "/effort off",
         "/mcp ",
+        "/mcp help",
         "/mcp list",
+        "/mcp serve",
         "/mcp show ",
         "/export ",
         "/issue ",
@@ -470,10 +477,15 @@ pub(crate) fn slash_command_completion_candidates_with_sessions(
         "/session switch ",
         "/session fork ",
         "/teleport ",
+        "/agents list",
         "/ultraplan ",
         "/agents help",
-        "/mcp help",
         "/skills help",
+        "/skills install ",
+        "/skills list",
+        "/think auto",
+        "/think on",
+        "/think off",
     ] {
         completions.insert(candidate.to_string());
     }
@@ -506,5 +518,62 @@ fn resolve_model_alias(model: &str) -> &str {
         "sonnet" => "claude-sonnet-4-6",
         "haiku" => "claude-haiku-4-5-20251213",
         _ => model,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slash_completion_candidates_include_common_arguments() {
+        let completions =
+            slash_command_completion_candidates_with_sessions("sonnet", None, Vec::new());
+
+        for expected in [
+            "/config env",
+            "/config hooks",
+            "/config model",
+            "/config plugins",
+            "/effort low",
+            "/effort medium",
+            "/effort high",
+            "/effort max",
+            "/effort off",
+            "/mcp serve",
+            "/skills list",
+            "/skills install ",
+            "/agents list",
+            "/think auto",
+            "/think on",
+            "/think off",
+        ] {
+            assert!(
+                completions.contains(&expected.to_string()),
+                "missing completion candidate: {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn slash_completion_candidates_keep_dynamic_model_and_sessions() {
+        let completions = slash_command_completion_candidates_with_sessions(
+            "openai/gpt-4.1",
+            Some("active-session"),
+            vec!["recent-a".to_string(), "recent-b".to_string()],
+        );
+
+        for expected in [
+            "/model openai/gpt-4.1",
+            "/resume active-session",
+            "/session switch active-session",
+            "/resume recent-a",
+            "/session switch recent-b",
+        ] {
+            assert!(
+                completions.contains(&expected.to_string()),
+                "missing dynamic completion candidate: {expected}"
+            );
+        }
     }
 }
